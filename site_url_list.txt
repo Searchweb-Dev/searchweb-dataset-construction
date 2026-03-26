@@ -1,0 +1,50 @@
+# General AI assistants
+https://chatgpt.com
+https://claude.com
+https://gemini.google.com
+https://copilot.microsoft.com
+https://www.perplexity.ai
+https://poe.com
+https://character.ai
+https://pi.ai
+
+# AI productivity / writing
+https://www.notion.com/product/ai
+https://www.grammarly.com/ai
+https://www.jasper.ai
+https://www.copy.ai
+https://writesonic.com
+https://gamma.app
+
+# AI coding
+https://replit.com
+https://cursor.com
+https://bolt.new
+https://lovable.dev
+https://v0.dev
+https://www.codeium.com
+https://sourcegraph.com/cody
+
+# AI image / video / creative
+https://www.midjourney.com
+https://runwayml.com
+https://stability.ai
+https://www.canva.com/ai-image-generator/
+https://www.adobe.com/products/firefly.html
+https://www.synthesia.io
+https://www.heygen.com
+https://www.descript.com
+https://leonardo.ai
+
+# AI audio / voice / music
+https://elevenlabs.io
+https://suno.com
+https://www.udio.com
+
+# AI platforms / model providers
+https://www.anthropic.com
+https://openai.com
+https://mistral.ai
+https://cohere.com
+https://www.together.ai
+https://replicate.com
