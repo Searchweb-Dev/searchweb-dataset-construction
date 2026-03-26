@@ -1,4 +1,4 @@
-# AI Tool/Service Dataset 구축 문서 (v1.1.1)
+# AI Tool/Service Dataset 구축 문서 (v1.1.0)
 
 ## 1. 프로젝트 개요
 
