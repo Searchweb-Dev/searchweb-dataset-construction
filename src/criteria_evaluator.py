@@ -15,7 +15,7 @@ from models import ClearDescriptionLLM, CriterionResult, EvaluationResult, Evide
 from page_fetcher import PageFetcher
 from status_policy import StatusPolicyMixin
 from taxonomy_classifier import TaxonomyClassifierMixin
-from utils import keyword_hit, lower, snippet, split_sentences
+from utils import has_usable_url_hint, is_same_domain, keyword_hit, lower, snippet, split_sentences
 
 
 PipelineStep = Callable[[Any, Dict[str, object]], None]
@@ -87,7 +87,22 @@ class CriteriaEvaluatorMixin:
             link_blob = lower(" ".join(" ".join([f"{t} {u}" for t, u in p.links[:100]]) for p in usable_pages))
             evidence.append(Evidence(usable_pages[0].final_url, snippet(usable_pages[0].meta_description or usable_pages[0].text), "fallback_accessible_page"))
 
-        positive = keyword_hit(blob, POSITIVE_USE_TEXT) or keyword_hit(link_blob, POSITIVE_USE_TEXT)
+        positive_text = keyword_hit(blob, POSITIVE_USE_TEXT) or keyword_hit(link_blob, POSITIVE_USE_TEXT)
+        positive_url_hint = False
+        for p in usable_pages:
+            for link_text, href in p.links[:120]:
+                if not href:
+                    continue
+                if not is_same_domain(homepage.final_url, href):
+                    continue
+                if has_usable_url_hint(href):
+                    positive_url_hint = True
+                    evidence.append(Evidence(href, snippet(f"{link_text} {href}"), "positive_use_url_hint"))
+                    break
+            if positive_url_hint:
+                break
+
+        positive = positive_text or positive_url_hint
         negative = keyword_hit(blob, NEGATIVE_USE_TEXT) or keyword_hit(link_blob, NEGATIVE_USE_TEXT)
         oss_install_ok = False
         for p in all_pages.values():
@@ -100,13 +115,16 @@ class CriteriaEvaluatorMixin:
                     evidence.append(Evidence(p.final_url, snippet(p.text), "docs_install_path"))
                     break
 
-        if positive:
-            evidence.append(Evidence(homepage.final_url, snippet(homepage.text), "positive_use_path"))
+        if positive_text:
+            evidence.append(Evidence(homepage.final_url, snippet(homepage.text), "positive_use_text_signal"))
         if negative and not positive and not oss_install_ok:
             return CriterionResult(name="usable_now", passed=False, reason="waitlist/coming soon/early access 신호만 있고 즉시 사용 경로가 없음", confidence=0.95, evidence=evidence or [Evidence(homepage.final_url, snippet(homepage.text), "negative_use_signal")])
         if positive or oss_install_ok:
             reason = "즉시 사용/가입/설치/실행 경로를 확인함" if homepage.ok else "홈페이지는 차단됐지만 대체 공개 페이지에서 즉시 사용/설치 경로를 확인함"
-            return CriterionResult(name="usable_now", passed=True, reason=reason, confidence=0.9 if oss_install_ok else 0.95, evidence=evidence or [Evidence(homepage.final_url, snippet(homepage.meta_description or homepage.text), "homepage")])
+            confidence = 0.95 if positive_text else 0.9
+            if oss_install_ok:
+                confidence = max(confidence, 0.9)
+            return CriterionResult(name="usable_now", passed=True, reason=reason, confidence=confidence, evidence=evidence or [Evidence(homepage.final_url, snippet(homepage.meta_description or homepage.text), "homepage")])
         reason = "즉시 사용 가능한 경로를 공개 페이지에서 확인하지 못함" if homepage.ok else "홈페이지 접근 실패 후 대체 페이지에서도 즉시 사용 가능한 경로를 확인하지 못함"
         return CriterionResult(name="usable_now", passed=False, reason=reason, confidence=0.7, evidence=[Evidence(homepage.final_url, snippet(homepage.text), "homepage")])
 
