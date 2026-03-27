@@ -3,16 +3,16 @@
 ## 사용법 (Bash 기준)
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh  # uv 설치
-uv venv --python 3.13  # .venv 가상환경 생성 (파이썬 버전 3.13)
-source .venv/bin/activate  # Bash에서 가상환경 활성화
-uv pip install -r requirements.txt  # 프로젝트 의존성 설치
-playwright install chromium  # Chromium 브라우저 설치
+curl -LsSf https://astral.sh/uv/install.sh | sh   # uv 설치
+uv venv --python 3.13                             # .venv 가상환경 생성 (파이썬 버전 3.13)
+source .venv/bin/activate                         # Bash에서 가상환경 활성화
+uv pip install -r requirements.txt                # 프로젝트 의존성 설치
+playwright install chromium                       # Chromium 브라우저 설치
 ```
 
 ```bash
-python src/main.py https://chatgpt.com  # 한 개의 사이트 평가 실행
-python src/main.py https://chatgpt.com https://claude.com  # 여러 사이트를 한 번에 평가 실행
+python src/main.py https://chatgpt.com                      # 한 개의 사이트 평가 실행
+python src/main.py https://chatgpt.com https://claude.com   # 여러 사이트를 한 번에 평가 실행
 ```
 
 여러 URL은 공백으로 나열해 한 번에 실행할 수 있다.
@@ -21,7 +21,8 @@ python src/main.py https://chatgpt.com https://claude.com  # 여러 사이트를
 셸에서 `&`가 백그라운드 실행 기호로 해석되어 URL이 잘릴 수 있다.
 
 ```bash
-python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"  # 쿼리스트링이 있는 URL 실행 예시
+# 쿼리스트링이 있는 URL 실행 예시
+python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"  
 ```
 
 ## 1. 프로젝트 개요
