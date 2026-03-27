@@ -196,8 +196,17 @@ python src/main.py --url-file site_url_list.txt
 
 ## 6. 품질 평가 지표
 
+### 현재 코드 기준 신뢰도 판단 로직
+
+- 1차 게이트: AI 사이트 스코프 판정 통과 필요(`is_ai_site=True`), 미통과 시 평가 제외 처리
+- 2차 평가: 5개 criteria(`usable_now`, `clear_function_desc`, `has_pricing`, `has_docs_or_help`, `has_privacy_or_data_policy`) 산출
+- 3차 점수화: criteria별 confidence와 가중치로 총점(0~100) 계산
+- 4차 상태 판정: 하한 게이트 + 총점 임계값으로 `curated` / `incubating` / `rejected` 결정
+- 5차 검수 게이트: 신뢰도 낮은 신호 존재 시 `review_required` 부여, 필요 시 `curated`에서 `incubating`으로 다운그레이드
+
 ### 공통 5개 지표 (criteria)
 - `usable_now`: 실제 즉시 사용 가능 여부
+- `usable_now` 판정 신호: CTA 텍스트 + 동일 도메인 진입 URL 힌트(`/create`, `/studio`, `/app`, `/editor` 등)
 - `clear_function_desc`: 기능 설명 명확성
 - `has_pricing`: 요금/플랜 공개 여부
 - `has_docs_or_help`: 문서/도움말 존재 여부
@@ -212,6 +221,13 @@ python src/main.py --url-file site_url_list.txt
   - `has_docs_or_help=0.20`
   - `has_privacy_or_data_policy=0.20`
   - `has_pricing=0.05`
+- rejected 탈출 하한:
+  - `usable_now >= 0.60`
+  - `clear_function_desc >= 0.50`
+- 상태 점수 컷:
+  - `curated >= 85.0` (단, `docs >= 0.30`, `policy >= 0.30` 추가 조건)
+  - `incubating >= 65.0`
+  - 그 외 `rejected`
 
 ---
 
