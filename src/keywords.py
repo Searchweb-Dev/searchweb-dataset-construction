@@ -12,7 +12,9 @@ POSITIVE_USE_TEXT = {
     "sign up", "signup", "get started", "start free", "try now", "try for free",
     "use now", "launch app", "open app", "login", "log in", "download", "install",
     "quickstart", "quick start", "start building", "run locally", "self-hosted",
+    "start creating", "create now", "generate now", "make art", "create image",
     "무료로 시작", "시작하기", "무료 체험", "다운로드", "설치", "로그인", "사용해보기",
+    "지금 생성", "이미지 생성", "바로 만들기",
 }
 
 NEGATIVE_USE_TEXT = {
