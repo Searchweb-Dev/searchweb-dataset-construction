@@ -84,6 +84,27 @@ def has_pricing_url_hint(url: str) -> bool:
     return any(seg in pricing_segments for seg in segments)
 
 
+def has_usable_url_hint(url: str) -> bool:
+    """URL 경로가 즉시 사용 진입(signup/app/create 등) 힌트를 가지는지 확인한다."""
+    path = lower(urlparse(url).path or "/")
+    segments = [seg for seg in path.strip("/").split("/") if seg]
+    usable_segments = {
+        "signup",
+        "sign-up",
+        "register",
+        "login",
+        "app",
+        "create",
+        "studio",
+        "editor",
+        "dashboard",
+        "workspace",
+        "generate",
+        "playground",
+    }
+    return any(seg in usable_segments for seg in segments)
+
+
 def is_likely_pricing_link(link_text: str, href: str) -> bool:
     """링크 텍스트/URL로 pricing 관련 링크 가능성을 판정한다."""
     blob = lower(f"{link_text} {href}")
