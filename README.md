@@ -1,6 +1,9 @@
 # AI Tool/Service Dataset 구축 문서 (v1.1.0)
 
-## 사용법 (Bash 기준)
+## 테스트 방법 (Bash 기준)
+
+현재 코드는 로컬 CLI 기반 평가 파이프라인까지만 구현되어 있다.
+아직 Postgres 등 외부 DB에 대한 세션 연결, 저장, 조회 연동은 포함되어 있지 않다.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh   # uv 설치
@@ -46,12 +49,15 @@ python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"
 ### 기본 원칙
 - 서비스 DB와 수집/정제/검증 파이프라인을 분리한다.
 - 서비스는 검증 완료 데이터(`curated`, 필요 시 `incubating`)만 읽기 중심으로 사용한다.
+- 현재 저장소에는 DB 세션 생성, 커넥션 관리, ORM/쿼리 레이어가 아직 구현되어 있지 않다.
 
 ### 논리 구조
 ```text
 [External Data Pipeline]
         ↓
 (정제/분류/검증 완료 데이터)
+        ↓
+[DB Load / Upsert Layer]
         ↓
 [Postgres - Service DB]
         ↓
@@ -73,6 +79,7 @@ python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"
   - 단일 실행 파일(CLI)
   - URL 목록을 받아 파이프라인 실행
   - 파이프라인 단계 정의(fetch → extract → ai_scope → classify → criteria → score/status → review → summary)
+  - 현재 구현은 평가 결과 생성까지 담당하며, DB 적재 단계는 아직 포함하지 않음
   - `PageFetcher`를 생성하고 `WeightedQualityEvaluator`에 주입
   - URL 병렬 평가 및 후보 URL 병렬 수집 실행
   - `DEFAULT_PIPELINE_STEPS` 포함
@@ -225,6 +232,32 @@ python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"
 8. 결과 요약문 생성 (`step_build_summary`)
 
 운영 확장(중복 제거/DB 반영/변경로그/주기 재검증)은 별도 데이터 파이프라인 레이어에서 연결한다.
+현재 저장소 범위에는 DB 적재 파이프라인과 세션 연결 코드가 포함되지 않는다.
+
+### 목표 파이프라인의 최종 단계
+
+이 문서는 데이터셋 구축 파이프라인을 설명하므로, 운영 기준의 최종 단계에는 DB 적재가 포함되어야 한다.
+
+1. 홈페이지 및 후보 페이지 수집
+2. 구조화 신호 추출
+3. AI 사이트 스코프 게이트 판정
+4. 분류 체계(Taxonomy) 판정
+5. 5개 품질 기준 평가
+6. 점수 계산 및 상태 예측
+7. 검수 게이트 반영
+8. 결과 요약 및 적재용 레코드 정규화
+9. Service DB(Postgres) 적재 또는 upsert
+10. 변경 이력(Change Log) 기록 및 후속 재검증 대상 등록
+
+### DB 적재 단계에서 해야 할 일
+
+- 평가 결과를 서비스 스키마에 맞는 레코드로 정규화
+- 기준 URL 또는 canonical URL 기준으로 중복 여부 판정
+- 신규 데이터는 insert, 기존 데이터는 upsert
+- 상태, 점수, 가격/정책 변경 여부를 비교해 변경 이력 기록
+- 적재 성공/실패 결과와 재시도 대상을 분리 관리
+
+현재 저장소에는 위 단계를 수행하는 DB 세션 연결, insert/upsert, 변경 이력 기록 로직이 아직 구현되어 있지 않다.
 
 ---
 
@@ -248,6 +281,12 @@ python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"
 - 정책/가격 변경 추적
 - Change Log 유지
 
+### 적재 관점 요구
+- 사이트의 canonical 식별자 기준 upsert 가능해야 함
+- 평가 시점(`evaluated_at`)과 적재 시점(`ingested_at`)을 분리해 저장해야 함
+- 현재 스냅샷 테이블과 변경 이력 테이블을 분리해 관리해야 함
+- 재검증 주기 대상과 적재 실패 대상을 추적할 수 있어야 함
+
 ### 설계 선택지
 - 정규화 중심 vs JSONB 중심은 성능/운영 전략에 따라 결정
 
@@ -261,7 +300,7 @@ python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"
 - 정책 변경 감지
 - 서비스 종료 감지
 
-### 변경 이력 관리 (필수)
+### Change Log 필수
 - 점수 변경
 - 정책 변경
 - 카테고리 변경
@@ -271,19 +310,7 @@ python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"
 
 ## 12. MVP 목표
 
-- `200개 이하` curated AI Tool
-- 전수 검증 통과
+- 200개 이하 curated AI Tool
+- 전부 검증 통과
 - 구조화 완료
-- 검색/필터/정렬 지원
-
----
-
-## 13. 기술적 의사결정 영역 (DE 소관)
-
-- 파이프라인 실행 방식(배치/이벤트)
-- LLM 호출 전략(실시간/배치)
-- 자동 반영 vs 검수 프로세스
-- DB 스키마/인덱스 설계
-- 크롤링 인프라 위치
-- 비용/캐싱 최적화
-- 변경 감지 방식
+- 검색/필터/정렬 가능
