@@ -20,6 +20,29 @@ PipelineContext = Dict[str, Any]
 PipelineStep = Callable[[Any, PipelineContext], None]
 
 
+def _build_shared_text_cache(all_pages: Dict[str, Any]) -> Dict[str, str]:
+    """ai_scope/taxonomy가 공통으로 사용하는 텍스트 블롭 캐시를 생성한다."""
+    usable_pages = [p for p in all_pages.values() if getattr(p, "ok", False)]
+    page_blobs = [" ".join([p.final_url, p.title, p.meta_description, p.text[:5000]]) for p in usable_pages]
+    header_blobs = [" ".join([p.final_url, p.title, p.meta_description]) for p in usable_pages]
+    link_blobs = [f"{t} {u}" for p in usable_pages for t, u in p.links[:80]]
+
+    from utils import lower
+
+    corpus = lower(" ".join(page_blobs))
+    header_blob = lower(" ".join(header_blobs))
+    links_blob = lower(" ".join(link_blobs))
+    ai_scope_blob = lower(" ".join(page_blobs + link_blobs))
+    combined_blob = " ".join([corpus, header_blob, links_blob])
+    return {
+        "corpus": corpus,
+        "header_blob": header_blob,
+        "links_blob": links_blob,
+        "combined_blob": combined_blob,
+        "ai_scope_blob": ai_scope_blob,
+    }
+
+
 def step_fetch_and_collect_pages(evaluator: Any, ctx: PipelineContext) -> None:
     """홈페이지와 후보 페이지를 수집해 컨텍스트에 적재한다."""
     normalized_url = ctx["normalized_url"]
@@ -31,7 +54,12 @@ def step_fetch_and_collect_pages(evaluator: Any, ctx: PipelineContext) -> None:
         and evaluator.config.parallel_url_evaluation
         and evaluator.config.url_evaluation_workers > 1
     ):
-        candidate_workers = max(1, candidate_workers // evaluator.config.url_evaluation_workers)
+        tuned_workers = max(1, candidate_workers // evaluator.config.url_evaluation_workers)
+        # 기본값(4/3)에서 워커가 1로 고정되는 병목을 줄이기 위해,
+        # 후보 URL이 여러 개인 경우 최소 2 워커를 보장한다.
+        if tuned_workers == 1 and candidate_workers > 1 and len(candidate_urls) > 1:
+            tuned_workers = 2
+        candidate_workers = tuned_workers
 
     if candidate_urls and evaluator.config.parallel_candidate_fetch and candidate_workers > 1:
         fetched_candidates = evaluator.fetcher.fetch_many(
@@ -59,6 +87,7 @@ def step_extract_signals(evaluator: Any, ctx: PipelineContext) -> None:
     homepage = ctx["homepage"]
     all_pages = ctx["all_pages"]
     extracted = evaluator._extract_structured_signals(homepage, list(all_pages.values()))
+    ctx["shared_text_cache"] = _build_shared_text_cache(all_pages)
     ctx["extracted"] = extracted
 
 
@@ -67,7 +96,8 @@ def step_classify_taxonomy(evaluator: Any, ctx: PipelineContext) -> None:
     homepage = ctx["homepage"]
     all_pages = ctx["all_pages"]
     extracted = ctx["extracted"]
-    taxonomy = evaluator._classify_taxonomy(homepage, all_pages, extracted)
+    shared_text_cache = ctx.get("shared_text_cache")
+    taxonomy = evaluator._classify_taxonomy(homepage, all_pages, extracted, text_cache=shared_text_cache)
     extracted["taxonomy"] = taxonomy
 
 
@@ -76,7 +106,8 @@ def step_assess_ai_scope(evaluator: Any, ctx: PipelineContext) -> None:
     homepage = ctx["homepage"]
     all_pages = ctx["all_pages"]
     extracted = ctx["extracted"]
-    ai_scope = evaluator._classify_ai_scope(homepage, all_pages)
+    shared_text_cache = ctx.get("shared_text_cache")
+    ai_scope = evaluator._classify_ai_scope(homepage, all_pages, text_cache=shared_text_cache)
     extracted["ai_scope"] = ai_scope
 
 

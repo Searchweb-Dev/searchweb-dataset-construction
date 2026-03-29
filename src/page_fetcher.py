@@ -7,7 +7,7 @@ from __future__ import annotations
 import threading
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
 
 import requests
@@ -40,11 +40,8 @@ class PageFetcher:
                 "pip install playwright 를 실행하세요."
             )
         self._thread_local = threading.local()
-        self._playwright_lock = threading.Lock()
-        self._pw_manager = None
-        self._pw = None
-        self._pw_browser = None
-        self._pw_context = None
+        self._playwright_resources_lock = threading.Lock()
+        self._playwright_resources: List[Dict[str, Any]] = []
         self._sessions_lock = threading.Lock()
         self._sessions: List[requests.Session] = []
 
@@ -63,7 +60,7 @@ class PageFetcher:
         req_result = self._fetch_with_requests(normalized)
         if not self.playwright_enabled:
             return req_result
-        if self._needs_playwright(req_result):
+        if self._needs_playwright(req_result, lightweight=lightweight):
             pw_result = self._fetch_with_playwright(normalized, lightweight=lightweight)
             if self._is_playwright_unavailable_error(pw_result.error):
                 return req_result
@@ -193,150 +190,174 @@ class PageFetcher:
                 error=self.playwright_disabled_reason or "playwright_unavailable",
                 fetched_by="playwright",
             )
-        with self._playwright_lock:
-            if not self._ensure_playwright_context():
-                return FetchResult(
-                    url=url,
-                    final_url=url,
-                    status_code=0,
-                    ok=False,
-                    html="",
-                    text="",
-                    title="",
-                    meta_description="",
-                    links=[],
-                    error=self.playwright_disabled_reason or "playwright_unavailable",
-                    fetched_by="playwright",
-                )
+        resource = self._get_or_create_playwright_resource()
+        if resource is None:
+            return FetchResult(
+                url=url,
+                final_url=url,
+                status_code=0,
+                ok=False,
+                html="",
+                text="",
+                title="",
+                meta_description="",
+                links=[],
+                error=self.playwright_disabled_reason or "playwright_unavailable",
+                fetched_by="playwright",
+            )
 
-            page = None
-            try:
-                page = self._pw_context.new_page()
-                page.set_default_timeout(self.config.playwright_timeout_ms)
-                response = page.goto(
-                    url,
+        page = None
+        try:
+            context = resource["context"]
+            page = context.new_page()
+            page.set_default_timeout(self.config.playwright_timeout_ms)
+            response = page.goto(
+                url,
+                wait_until=self.config.playwright_wait_until,
+                timeout=self.config.playwright_timeout_ms,
+            )
+            extra_wait_ms = self.config.playwright_extra_wait_ms
+            challenge_wait_ms = self.config.playwright_challenge_wait_ms
+            challenge_retries = self.config.playwright_challenge_retries
+            if lightweight:
+                extra_wait_ms = min(extra_wait_ms, 300)
+                challenge_wait_ms = min(challenge_wait_ms, 2500)
+                challenge_retries = 0
+
+            if extra_wait_ms > 0:
+                page.wait_for_timeout(extra_wait_ms)
+
+            self._dismiss_common_banners(page)
+            if not lightweight:
+                self._safe_auto_scroll(page)
+                page.wait_for_timeout(300)
+            else:
+                page.wait_for_timeout(120)
+
+            challenge_ok = self._wait_until_non_challenge(page, challenge_wait_ms)
+            retries_left = challenge_retries
+            while not challenge_ok and retries_left > 0:
+                reload_response = page.reload(
                     wait_until=self.config.playwright_wait_until,
                     timeout=self.config.playwright_timeout_ms,
                 )
-                extra_wait_ms = self.config.playwright_extra_wait_ms
-                challenge_wait_ms = self.config.playwright_challenge_wait_ms
-                challenge_retries = self.config.playwright_challenge_retries
-                if lightweight:
-                    extra_wait_ms = min(extra_wait_ms, 300)
-                    challenge_wait_ms = min(challenge_wait_ms, 2500)
-                    challenge_retries = 0
-
-                if extra_wait_ms > 0:
-                    page.wait_for_timeout(extra_wait_ms)
-
-                self._dismiss_common_banners(page)
-                if not lightweight:
-                    self._safe_auto_scroll(page)
-                    page.wait_for_timeout(300)
-                else:
-                    page.wait_for_timeout(120)
-
+                if reload_response:
+                    response = reload_response
+                page.wait_for_timeout(600)
                 challenge_ok = self._wait_until_non_challenge(page, challenge_wait_ms)
-                retries_left = challenge_retries
-                while not challenge_ok and retries_left > 0:
-                    reload_response = page.reload(
-                        wait_until=self.config.playwright_wait_until,
-                        timeout=self.config.playwright_timeout_ms,
-                    )
-                    if reload_response:
-                        response = reload_response
-                    page.wait_for_timeout(600)
-                    challenge_ok = self._wait_until_non_challenge(page, challenge_wait_ms)
-                    retries_left -= 1
+                retries_left -= 1
 
-                status_code = response.status if response else 200
-                result = self._build_fetch_result(
-                    requested_url=url,
-                    final_url=page.url,
-                    status_code=status_code,
-                    html=page.content(),
-                    ok=200 <= status_code < 400,
-                    error=None,
-                    fetched_by="playwright",
-                )
-                if self._is_challenge_result(result):
-                    result.ok = False
-                    result.error = "anti_bot_challenge_detected"
-                    return result
-                if result.status_code >= 400 and len(result.text or "") >= self.config.min_text_len_for_static_success:
-                    result.ok = True
+            status_code = response.status if response else 200
+            result = self._build_fetch_result(
+                requested_url=url,
+                final_url=page.url,
+                status_code=status_code,
+                html=page.content(),
+                ok=200 <= status_code < 400,
+                error=None,
+                fetched_by="playwright",
+            )
+            if self._is_challenge_result(result):
+                result.ok = False
+                result.error = "anti_bot_challenge_detected"
                 return result
-            except PlaywrightTimeoutError as e:
-                return FetchResult(
-                    url=url,
-                    final_url=url,
-                    status_code=0,
-                    ok=False,
-                    html="",
-                    text="",
-                    title="",
-                    meta_description="",
-                    links=[],
-                    error=f"playwright_timeout: {e}",
-                    fetched_by="playwright",
+            if result.status_code >= 400 and len(result.text or "") >= self.config.min_text_len_for_static_success:
+                result.ok = True
+            return result
+        except PlaywrightTimeoutError as e:
+            return FetchResult(
+                url=url,
+                final_url=url,
+                status_code=0,
+                ok=False,
+                html="",
+                text="",
+                title="",
+                meta_description="",
+                links=[],
+                error=f"playwright_timeout: {e}",
+                fetched_by="playwright",
+            )
+        except Exception as e:
+            error_text = f"playwright_error: {e}"
+            if self._is_playwright_unavailable_error(error_text):
+                self.playwright_enabled = False
+                self.playwright_disabled_reason = (
+                    "playwright_unavailable: 브라우저 실행 파일이 없습니다. "
+                    "playwright install 로 브라우저를 설치하세요."
                 )
-            except Exception as e:
-                error_text = f"playwright_error: {e}"
-                if self._is_playwright_unavailable_error(error_text):
-                    self.playwright_enabled = False
-                    self.playwright_disabled_reason = (
-                        "playwright_unavailable: 브라우저 실행 파일이 없습니다. "
-                        "playwright install 로 브라우저를 설치하세요."
-                    )
-                    self._close_playwright_resources()
-                return FetchResult(
-                    url=url,
-                    final_url=url,
-                    status_code=0,
-                    ok=False,
-                    html="",
-                    text="",
-                    title="",
-                    meta_description="",
-                    links=[],
-                    error=error_text,
-                    fetched_by="playwright",
-                )
-            finally:
-                if page:
-                    try:
-                        page.close()
-                    except Exception:
-                        pass
+                self._close_playwright_resources()
+            else:
+                # 스레드별 컨텍스트가 손상된 경우 다음 요청에서 재생성되도록 정리한다.
+                self._close_playwright_resource(resource)
+            return FetchResult(
+                url=url,
+                final_url=url,
+                status_code=0,
+                ok=False,
+                html="",
+                text="",
+                title="",
+                meta_description="",
+                links=[],
+                error=error_text,
+                fetched_by="playwright",
+            )
+        finally:
+            if page:
+                try:
+                    page.close()
+                except Exception:
+                    pass
 
-    def _ensure_playwright_context(self) -> bool:
-        """Playwright 인스턴스/브라우저/컨텍스트를 재사용 가능 상태로 보장한다."""
+    def _register_playwright_resource(self, resource: Dict[str, Any]) -> None:
+        """생성된 Playwright 리소스를 종료 정리를 위해 등록한다."""
+        with self._playwright_resources_lock:
+            if resource not in self._playwright_resources:
+                self._playwright_resources.append(resource)
+
+    def _get_or_create_playwright_resource(self) -> Optional[Dict[str, Any]]:
+        """현재 스레드의 Playwright 리소스를 반환하고 없으면 생성한다."""
         if not self.playwright_enabled:
-            return False
-        if self._pw_context is not None and self._pw_browser is not None and self._pw is not None:
-            return True
+            return None
+        resource = getattr(self._thread_local, "playwright_resource", None)
+        if resource is not None:
+            context = resource.get("context")
+            browser = resource.get("browser")
+            pw = resource.get("pw")
+            if context is not None and browser is not None and pw is not None:
+                return resource
+
         try:
-            self._pw_manager = sync_playwright()
-            self._pw = self._pw_manager.start()
-            browser_type = getattr(self._pw, self.config.playwright_browser)
-            self._pw_browser = browser_type.launch(
+            manager = sync_playwright()
+            pw = manager.start()
+            browser_type = getattr(pw, self.config.playwright_browser)
+            browser = browser_type.launch(
                 headless=self.config.playwright_headless,
                 args=["--disable-blink-features=AutomationControlled"],
             )
-            self._pw_context = self._pw_browser.new_context(
+            context = browser.new_context(
                 user_agent=self.config.playwright_user_agent,
                 locale="en-US",
                 viewport={"width": 1366, "height": 900},
             )
-            self._pw_context.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9,ko;q=0.8"})
-            self._pw_context.add_init_script(
+            context.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9,ko;q=0.8"})
+            context.add_init_script(
                 """
                 Object.defineProperty(navigator, 'webdriver', {
                     get: () => undefined
                 });
                 """
             )
-            return True
+            resource = {
+                "manager": manager,
+                "pw": pw,
+                "browser": browser,
+                "context": context,
+            }
+            self._thread_local.playwright_resource = resource
+            self._register_playwright_resource(resource)
+            return resource
         except Exception as e:
             error_text = f"playwright_error: {e}"
             if self._is_playwright_unavailable_error(error_text):
@@ -346,29 +367,50 @@ class PageFetcher:
                     "playwright install 로 브라우저를 설치하세요."
                 )
             self._close_playwright_resources()
-            return False
+            return None
+
+    def _shutdown_playwright_resource(self, resource: Dict[str, Any]) -> None:
+        """단일 Playwright 리소스의 context/browser/manager를 순서대로 닫는다."""
+        try:
+            context = resource.get("context")
+            if context is not None:
+                context.close()
+        except Exception:
+            pass
+        try:
+            browser = resource.get("browser")
+            if browser is not None:
+                browser.close()
+        except Exception:
+            pass
+        try:
+            manager = resource.get("manager")
+            if manager is not None:
+                manager.stop()
+        except Exception:
+            pass
+        resource["context"] = None
+        resource["browser"] = None
+        resource["pw"] = None
+        resource["manager"] = None
+
+    def _close_playwright_resource(self, resource: Dict[str, Any]) -> None:
+        """단일 Playwright 리소스를 등록 목록/스레드 로컬에서 제거하고 닫는다."""
+        with self._playwright_resources_lock:
+            self._playwright_resources = [r for r in self._playwright_resources if r is not resource]
+        current = getattr(self._thread_local, "playwright_resource", None)
+        if current is resource:
+            self._thread_local.playwright_resource = None
+        self._shutdown_playwright_resource(resource)
 
     def _close_playwright_resources(self) -> None:
-        """보유 중인 Playwright 리소스를 모두 닫는다."""
-        try:
-            if self._pw_context:
-                self._pw_context.close()
-        except Exception:
-            pass
-        try:
-            if self._pw_browser:
-                self._pw_browser.close()
-        except Exception:
-            pass
-        try:
-            if self._pw_manager:
-                self._pw_manager.stop()
-        except Exception:
-            pass
-        self._pw_context = None
-        self._pw_browser = None
-        self._pw = None
-        self._pw_manager = None
+        """보유 중인 모든 Playwright 리소스를 닫는다."""
+        with self._playwright_resources_lock:
+            resources = list(self._playwright_resources)
+            self._playwright_resources.clear()
+        for resource in resources:
+            self._shutdown_playwright_resource(resource)
+        self._thread_local.playwright_resource = None
 
     def close(self) -> None:
         """외부에서 fetcher 종료 시 리소스를 정리한다."""
@@ -553,9 +595,11 @@ class PageFetcher:
             fetched_by=fetched_by,
         )
 
-    def _needs_playwright(self, req_result: FetchResult) -> bool:
+    def _needs_playwright(self, req_result: FetchResult, lightweight: bool = False) -> bool:
         """requests 결과만으로 부족한 경우 playwright 재수집 여부를 판정한다."""
         if not req_result.ok:
+            return True
+        if self._is_challenge_result(req_result):
             return True
         html_lower = lower(req_result.html[:20000])
         text_len = len(req_result.text or "")
@@ -564,11 +608,22 @@ class PageFetcher:
             "__next", "id=\"__next\"", "id=\"root\"", "id=\"app\"",
             "data-reactroot", "window.__nuxt__", "webpack", "chunk.js", "hydration",
         ]
-        if text_len < self.config.min_text_len_for_static_success:
+
+        has_js_app_signal = any(sig in html_lower for sig in js_app_signals)
+        thin_text = text_len < self.config.min_text_len_for_static_success
+        thin_links = link_count < self.config.min_links_for_static_success
+
+        # 후보(lightweight) 수집은 속도 우선: requests가 성공했고 챌린지 징후가 없으면
+        # JS 앱 + 매우 빈약한 본문 케이스만 playwright로 재수집한다.
+        if lightweight:
+            if has_js_app_signal and thin_text:
+                return True
+            return False
+
+        # 일반 수집은 두 신호가 함께 빈약할 때만 playwright 재수집한다.
+        if thin_text and thin_links:
             return True
-        if link_count < self.config.min_links_for_static_success:
-            return True
-        if any(sig in html_lower for sig in js_app_signals):
+        if has_js_app_signal and (thin_text or thin_links):
             return True
         return False
 

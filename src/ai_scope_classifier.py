@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict
+from typing import Dict, Optional
 
 from keywords import (
     AI_SITE_STRONG_KEYWORDS,
@@ -20,12 +20,21 @@ from utils import get_domain, lower
 class AiScopeClassifierMixin:
     """수집 텍스트를 기반으로 AI 사이트 여부를 판정하는 믹스인."""
 
-    def _classify_ai_scope(self, homepage: FetchResult, all_pages: Dict[str, FetchResult]) -> Dict[str, object]:
+    def _classify_ai_scope(
+        self,
+        homepage: FetchResult,
+        all_pages: Dict[str, FetchResult],
+        text_cache: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, object]:
         """페이지 텍스트/링크를 결합해 AI 사이트 판정 결과를 반환한다."""
-        usable_pages = [p for p in all_pages.values() if p.ok]
-        page_blobs = [" ".join([p.final_url, p.title, p.meta_description, p.text[:5000]]) for p in usable_pages]
-        link_blobs = [f"{t} {u}" for p in usable_pages for t, u in p.links[:80]]
-        combined_blob = lower(" ".join(page_blobs + link_blobs))
+        combined_blob = ""
+        if text_cache:
+            combined_blob = str(text_cache.get("ai_scope_blob", "")).strip()
+        if not combined_blob:
+            usable_pages = [p for p in all_pages.values() if p.ok]
+            page_blobs = [" ".join([p.final_url, p.title, p.meta_description, p.text[:5000]]) for p in usable_pages]
+            link_blobs = [f"{t} {u}" for p in usable_pages for t, u in p.links[:80]]
+            combined_blob = lower(" ".join(page_blobs + link_blobs))
         return self._infer_ai_site_scope(combined_blob, homepage)
 
     def _infer_ai_site_scope(self, text_blob: str, homepage: FetchResult) -> Dict[str, object]:

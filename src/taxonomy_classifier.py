@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from keywords import (
     DEFAULT_META_BY_PRIMARY,
@@ -22,16 +22,33 @@ from utils import keyword_hit, keyword_hit_count, lower, snippet, split_sentence
 class TaxonomyClassifierMixin:
     """수집 텍스트를 기반으로 taxonomy를 분류하는 믹스인."""
 
-    def _classify_taxonomy(self, homepage: FetchResult, all_pages: Dict[str, FetchResult], extracted: Dict[str, object]) -> Dict[str, object]:
+    def _classify_taxonomy(
+        self,
+        homepage: FetchResult,
+        all_pages: Dict[str, FetchResult],
+        extracted: Dict[str, object],
+        text_cache: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, object]:
         """본문/메타/링크 텍스트 기반으로 taxonomy(카테고리/태그)를 분류한다."""
         usable_pages = [p for p in all_pages.values() if p.ok]
-        page_blobs = [" ".join([p.final_url, p.title, p.meta_description, p.text[:5000]]) for p in usable_pages]
-        header_blobs = [" ".join([p.final_url, p.title, p.meta_description]) for p in usable_pages]
-        link_blobs = [f"{t} {u}" for p in usable_pages for t, u in p.links[:80]]
-        corpus = lower(" ".join(page_blobs))
-        header_blob = lower(" ".join(header_blobs))
-        links_blob = lower(" ".join(link_blobs))
-        combined_blob = " ".join([corpus, header_blob, links_blob])
+        if text_cache:
+            corpus = str(text_cache.get("corpus", "")).strip()
+            header_blob = str(text_cache.get("header_blob", "")).strip()
+            links_blob = str(text_cache.get("links_blob", "")).strip()
+            combined_blob = str(text_cache.get("combined_blob", "")).strip()
+        else:
+            corpus = ""
+            header_blob = ""
+            links_blob = ""
+            combined_blob = ""
+        if not combined_blob:
+            page_blobs = [" ".join([p.final_url, p.title, p.meta_description, p.text[:5000]]) for p in usable_pages]
+            header_blobs = [" ".join([p.final_url, p.title, p.meta_description]) for p in usable_pages]
+            link_blobs = [f"{t} {u}" for p in usable_pages for t, u in p.links[:80]]
+            corpus = lower(" ".join(page_blobs))
+            header_blob = lower(" ".join(header_blobs))
+            links_blob = lower(" ".join(link_blobs))
+            combined_blob = " ".join([corpus, header_blob, links_blob])
         ai_scope = extracted.get("ai_scope", {})
         scope_decision = str(ai_scope.get("scope_decision", "")).lower()
         is_ai_site = bool(ai_scope.get("is_ai_site", True))
