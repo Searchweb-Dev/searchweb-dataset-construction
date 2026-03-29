@@ -18,22 +18,17 @@ playwright install chromium                       # Chromium 브라우저 설치
 ### 평가 실행 방법
 
 ```bash
-# 한 개의 사이트 평가 실행
-python src/main.py https://chatgpt.com
-# 여러 사이트를 한 번에 평가 실행
-python src/main.py https://chatgpt.com https://claude.com
-# 쿼리스트링이 있는 URL 실행 예시
-python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"
-# 텍스트 파일에 적은 URL 목록으로 평가 실행
-python src/main.py site_url_list.txt
-# URL 목록 파일을 명시적으로 지정해 평가 실행
-python src/main.py --url-file site_url_list.txt
+python src/main.py https://chatgpt.com                      # 한 개의 사이트 평가 실행
+python src/main.py https://chatgpt.com https://claude.com   # 여러 사이트를 한 번에 평가 실행
+python src/main.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"  # 쿼리스트링이 있는 URL 실행 예시
+python src/main.py site_url_list.txt                        # 텍스트 파일에 적은 URL 목록으로 평가 실행
+python src/main.py --url-file site_url_list.txt             # URL 목록 파일을 명시적으로 지정해 평가 실행
 ```
 
 - 여러 URL은 공백으로 나열해 한 번에 실행할 수 있다.
 - `site_url_list.txt`처럼 줄 단위로 URL을 적은 텍스트 파일로도 실행 가능하다.
 - 쿼리스트링이 포함된 URL은 반드시 따옴표(`"` 또는 `'`)로 감싸서 실행한다.
-  + 셸에서 `&`가 백그라운드 실행 기호로 해석되어 URL이 잘릴 수 있다.
+- 셸에서 `&`가 백그라운드 실행 기호로 해석되어 URL이 잘릴 수 있다.
 
 
 ## 1. 프로젝트 개요
@@ -94,6 +89,7 @@ python src/main.py --url-file site_url_list.txt
 - `src/config.py`
   - 파이프라인/평가/수집 관련 전역 설정(`EvalConfig`)
   - `max_sub_tasks`, 병렬 옵션, Playwright 옵션 포함
+  - `ai_scope_uncertain_*` 경계구간 임계값 포함
 - `src/models.py`
   - 결과 데이터 구조(`FetchResult`, `CriterionResult`, `EvaluationResult` 등)
 - `src/page_fetcher.py`
@@ -101,10 +97,14 @@ python src/main.py --url-file site_url_list.txt
   - lightweight candidate fetch, 링크/본문 길이 상한 적용
 - `src/discovery_signals.py`
   - 후보 URL 수집/구조화 신호(extracted) 추출
+  - known-domain(OpenAI/ChatGPT) 관련 외부 docs/policy/pricing 후보를 fallback 조건과 무관하게 포함
 - `src/ai_scope_classifier.py`
   - 평가 대상이 AI 사이트인지 스코프 게이트 판정
+  - `AI strong/weak` + `NON_AI strong/weak` 가중 점수(`2*strong + weak`)와 margin 기반 규칙 적용
+  - 판정 결과를 `ai` / `uncertain` / `non_ai`로 구분
 - `src/taxonomy_classifier.py`
-  - (AI 사이트로 판정된 경우에만) 규칙 기반 카테고리/태그 분류
+  - `scope_decision=non_ai`일 때 taxonomy 상세 분류를 스킵
+  - `scope_decision=ai|uncertain`일 때 규칙 기반 카테고리/태그 분류
   - sub-task는 `config.max_sub_tasks`까지 반환
 - `src/criteria_evaluator.py`
   - 5개 criteria 평가
@@ -113,8 +113,10 @@ python src/main.py --url-file site_url_list.txt
   - 가중치 점수 기반 상태 판정 evaluator(`WeightedQualityEvaluator`)
 - `src/status_policy.py`
   - review gate 및 summary 정책
+  - `scope_decision=uncertain`이면 수동 검토 사유 자동 추가
 - `src/keywords.py`
   - 카테고리/서브태스크/플랫폼/정책 판정용 키워드 사전
+  - AI/NON_AI 키워드를 strong/weak 세트로 분리해 관리
 - `src/utils.py`
   - URL 정규화, 텍스트 정리, 키워드 매칭, 링크 판정 유틸 함수
 
@@ -198,11 +200,24 @@ python src/main.py --url-file site_url_list.txt
 
 ### 현재 코드 기준 신뢰도 판단 로직
 
-- 1차 게이트: AI 사이트 스코프 판정 통과 필요(`is_ai_site=True`), 미통과 시 평가 제외 처리
+- 1차 게이트: AI 사이트 스코프 판정(`scope_decision=ai|uncertain|non_ai`)
+  - `non_ai`: 평가 제외 처리
+  - `ai`: 정상 평가
+  - `uncertain`: 정상 평가 + 수동 검토 대상 플래그
 - 2차 평가: 5개 criteria(`usable_now`, `clear_function_desc`, `has_pricing`, `has_docs_or_help`, `has_privacy_or_data_policy`) 산출
 - 3차 점수화: criteria별 confidence와 가중치로 총점(0~100) 계산
 - 4차 상태 판정: 하한 게이트 + 총점 임계값으로 `curated` / `incubating` / `rejected` 결정
 - 5차 검수 게이트: 신뢰도 낮은 신호 존재 시 `review_required` 부여, 필요 시 `curated`에서 `incubating`으로 다운그레이드
+
+### AI 스코프 게이트(현재 규칙)
+
+- AI 점수: `2 * strong_ai_hits + weak_ai_hits`
+- 비AI 점수: `2 * strong_non_ai_hits + weak_non_ai_hits`
+- margin: `ai_signal_score - non_ai_signal_score`
+- 경계구간(`uncertain`) 기본 임계값:
+  - `ai_scope_uncertain_margin_low = -1`
+  - `ai_scope_uncertain_margin_high = 2`
+  - `ai_scope_uncertain_non_ai_score_cap = 6`
 
 ### 공통 5개 지표 (criteria)
 - `usable_now`: 실제 즉시 사용 가능 여부
@@ -228,6 +243,8 @@ python src/main.py --url-file site_url_list.txt
   - `curated >= 85.0` (단, `docs >= 0.30`, `policy >= 0.30` 추가 조건)
   - `incubating >= 65.0`
   - 그 외 `rejected`
+- 추가 검수 규칙:
+  - `scope_decision=uncertain`이면 `review_required=True`
 
 ---
 
@@ -237,6 +254,7 @@ python src/main.py --url-file site_url_list.txt
   - `curated`
   - `incubating`
   - `rejected`
+- `ai_scope`의 `scope_decision( ai / uncertain / non_ai )`는 상태값이 아니라 평가 스코프/검수 흐름 제어용 신호다.
 - `review gate`에서 `curated`가 `incubating`으로 다운그레이드될 수 있다.
 - `discovered`, `validated`, `deprecated`는 데이터 운영 레이어에서 확장 가능한 개념 상태로 유지한다.
 
@@ -291,6 +309,7 @@ python src/main.py --url-file site_url_list.txt
 - taxonomy 분류(`primary_category`, `sub_tasks`, `meta_categories`, `platforms` 등)는 **규칙 기반**이다.
 - LLM은 `clear_function_desc` 기준에서만 선택적으로 사용 가능하다(`enable_llm_for_clear_desc=True`).
 - 기본 실행(`src/main.py`)은 `use_llm=False`로 동작한다.
+- `ai_scope` 판정 역시 현재는 전부 규칙 기반이며 LLM/모델 재판정 단계는 구현되어 있지 않다.
 - `use_llm=True`로 바꿔도 현재 저장소에서는 외부 LLM API를 직접 호출하지 않는다.
 - 현재 연결되는 구현체는 `DummyLLM`이며, 이는 실제 모델이 아니라 LLM 연동 자리를 검증하기 위한 테스트용 스텁이다.
 - `DummyLLM`은 `candidate_sentence`에 대한 단순 키워드 휴리스틱으로 `passed`, `confidence`, `reason`, `summary` 형식의 응답만 흉내 낸다.
