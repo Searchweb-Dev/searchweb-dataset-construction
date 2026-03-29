@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 from typing import Dict, List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from config import EvalConfig
 from keywords import DOCS_TEXT, NEGATIVE_USE_TEXT, POLICY_TEXT, POSITIVE_USE_TEXT
@@ -43,6 +43,25 @@ class DiscoverySignalMixin:
             seen_in_kind[kind].add(nu)
             kinds[kind].append(nu)
 
+        def add_related_seed(u: str) -> None:
+            """도메인 규칙 기반 외부 후보를 성격에 맞는 kind로 우선 배치한다."""
+            parsed = urlparse(u)
+            host = (parsed.netloc or "").lower()
+            path = (parsed.path or "").lower()
+            if any(seg in path for seg in ["/pricing", "/plans"]):
+                add_url("pricing", u)
+                return
+            if any(seg in path for seg in ["/privacy", "/policy", "/terms", "/security"]):
+                add_url("policy", u)
+                return
+            if host.startswith(("help.", "docs.", "support.", "developers.", "developer.")):
+                add_url("docs", u)
+                return
+            if any(seg in path for seg in ["/help", "/docs", "/support", "/faq", "/guide", "/collections/"]):
+                add_url("docs", u)
+                return
+            add_url("probe", u)
+
         if homepage.ok:
             for link_text, href in homepage.links:
                 blob = lower(f"{link_text} {href}")
@@ -60,12 +79,14 @@ class DiscoverySignalMixin:
                 if same_domain and any(k in blob for k in ["product", "features", "how it works", "about", "use cases", "solutions", "platform", "기능", "소개", "사용 사례"]):
                     add_url("product", href)
 
+        # ChatGPT/OpenAI 같은 known-domain 후보는 fallback 여부와 상관없이 항상 고려한다.
+        for seed in likely_related_external_candidates(homepage_url):
+            add_related_seed(seed)
+
         estimated_collected = len(kinds["pricing"]) + len(kinds["docs"]) + len(kinds["policy"]) + len(kinds["product"])
         if (not homepage.ok) or estimated_collected < min(4, self.config.max_total_candidate_pages):
             for path in self.config.fallback_probe_paths:
                 add_url("probe", urljoin(homepage_url, path))
-            for probe in likely_related_external_candidates(homepage_url):
-                add_url("probe", probe)
 
         ordered: List[str] = []
         seen_global = set()

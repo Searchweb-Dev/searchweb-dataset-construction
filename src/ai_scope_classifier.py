@@ -7,7 +7,12 @@ from __future__ import annotations
 import re
 from typing import Dict
 
-from keywords import AI_SITE_STRONG_KEYWORDS, AI_SITE_WEAK_KEYWORDS, NON_AI_SITE_KEYWORDS
+from keywords import (
+    AI_SITE_STRONG_KEYWORDS,
+    AI_SITE_WEAK_KEYWORDS,
+    NON_AI_SITE_STRONG_KEYWORDS,
+    NON_AI_SITE_WEAK_KEYWORDS,
+)
 from models import FetchResult
 from utils import get_domain, lower
 
@@ -28,13 +33,20 @@ class AiScopeClassifierMixin:
         normalized_blob = lower(text_blob)
         strong_ai_hits = self._collect_keyword_hits(normalized_blob, AI_SITE_STRONG_KEYWORDS)
         weak_ai_hits = self._collect_keyword_hits(normalized_blob, AI_SITE_WEAK_KEYWORDS)
-        non_ai_hits = self._collect_keyword_hits(normalized_blob, NON_AI_SITE_KEYWORDS)
+        strong_non_ai_hits = self._collect_keyword_hits(normalized_blob, NON_AI_SITE_STRONG_KEYWORDS)
+        weak_non_ai_hits = self._collect_keyword_hits(normalized_blob, NON_AI_SITE_WEAK_KEYWORDS)
+        non_ai_hits = strong_non_ai_hits | weak_non_ai_hits
         if re.search(r"(?<![a-z0-9])ai(?![a-z0-9])", normalized_blob):
             weak_ai_hits.add("ai")
 
         ai_hits = strong_ai_hits | weak_ai_hits
+        explicit_ai_weak_hits = {
+            k
+            for k in weak_ai_hits
+            if k in {"ai", "ai assistant", "ai agent"}
+        }
         ai_signal_score = (2 * len(strong_ai_hits)) + len(weak_ai_hits)
-        non_ai_signal_score = len(non_ai_hits)
+        non_ai_signal_score = (2 * len(strong_non_ai_hits)) + len(weak_non_ai_hits)
         ai_non_ai_margin = ai_signal_score - non_ai_signal_score
 
         domain = get_domain(homepage.final_url or homepage.url)
@@ -62,11 +74,13 @@ class AiScopeClassifierMixin:
                 "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
                 "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
                 "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "strong_non_ai_keyword_hits": sorted(strong_non_ai_hits)[:8],
+                "weak_non_ai_keyword_hits": sorted(weak_non_ai_hits)[:8],
                 "ai_signal_score": ai_signal_score,
                 "non_ai_signal_score": non_ai_signal_score,
                 "ai_non_ai_margin": ai_non_ai_margin,
             }
-        if len(strong_ai_hits) >= 1 and (len(weak_ai_hits) >= 1 or ai_non_ai_margin >= 1) and non_ai_signal_score <= 3:
+        if len(strong_ai_hits) >= 1 and (len(weak_ai_hits) >= 1 or ai_non_ai_margin >= 1) and non_ai_signal_score <= 4:
             return {
                 "is_ai_site": True,
                 "confidence": 0.88,
@@ -75,11 +89,19 @@ class AiScopeClassifierMixin:
                 "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
                 "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
                 "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "strong_non_ai_keyword_hits": sorted(strong_non_ai_hits)[:8],
+                "weak_non_ai_keyword_hits": sorted(weak_non_ai_hits)[:8],
                 "ai_signal_score": ai_signal_score,
                 "non_ai_signal_score": non_ai_signal_score,
                 "ai_non_ai_margin": ai_non_ai_margin,
             }
-        if len(strong_ai_hits) == 0 and len(weak_ai_hits) >= 3 and ai_non_ai_margin >= 2 and non_ai_signal_score <= 2:
+        if (
+            len(strong_ai_hits) == 0
+            and len(explicit_ai_weak_hits) >= 1
+            and len(weak_ai_hits) >= 3
+            and ai_non_ai_margin >= 3
+            and non_ai_signal_score <= 1
+        ):
             return {
                 "is_ai_site": True,
                 "confidence": 0.74,
@@ -88,11 +110,13 @@ class AiScopeClassifierMixin:
                 "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
                 "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
                 "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "strong_non_ai_keyword_hits": sorted(strong_non_ai_hits)[:8],
+                "weak_non_ai_keyword_hits": sorted(weak_non_ai_hits)[:8],
                 "ai_signal_score": ai_signal_score,
                 "non_ai_signal_score": non_ai_signal_score,
                 "ai_non_ai_margin": ai_non_ai_margin,
             }
-        if known_ai_brand_hint and (len(strong_ai_hits) >= 1 or ai_non_ai_margin >= 1 or non_ai_signal_score <= 2):
+        if known_ai_brand_hint and (len(strong_ai_hits) >= 1 or ai_non_ai_margin >= 1 or non_ai_signal_score <= 3):
             return {
                 "is_ai_site": True,
                 "confidence": 0.84 if len(strong_ai_hits) >= 1 else 0.7,
@@ -101,11 +125,13 @@ class AiScopeClassifierMixin:
                 "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
                 "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
                 "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "strong_non_ai_keyword_hits": sorted(strong_non_ai_hits)[:8],
+                "weak_non_ai_keyword_hits": sorted(weak_non_ai_hits)[:8],
                 "ai_signal_score": ai_signal_score,
                 "non_ai_signal_score": non_ai_signal_score,
                 "ai_non_ai_margin": ai_non_ai_margin,
             }
-        if tld_ai_hint and (len(strong_ai_hits) >= 1 or (len(weak_ai_hits) >= 2 and non_ai_signal_score <= 1)):
+        if tld_ai_hint and (len(strong_ai_hits) >= 1 or (len(weak_ai_hits) >= 2 and non_ai_signal_score <= 2)):
             return {
                 "is_ai_site": True,
                 "confidence": 0.73,
@@ -114,6 +140,8 @@ class AiScopeClassifierMixin:
                 "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
                 "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
                 "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "strong_non_ai_keyword_hits": sorted(strong_non_ai_hits)[:8],
+                "weak_non_ai_keyword_hits": sorted(weak_non_ai_hits)[:8],
                 "ai_signal_score": ai_signal_score,
                 "non_ai_signal_score": non_ai_signal_score,
                 "ai_non_ai_margin": ai_non_ai_margin,
@@ -126,6 +154,8 @@ class AiScopeClassifierMixin:
             "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
             "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
             "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+            "strong_non_ai_keyword_hits": sorted(strong_non_ai_hits)[:8],
+            "weak_non_ai_keyword_hits": sorted(weak_non_ai_hits)[:8],
             "ai_signal_score": ai_signal_score,
             "non_ai_signal_score": non_ai_signal_score,
             "ai_non_ai_margin": ai_non_ai_margin,

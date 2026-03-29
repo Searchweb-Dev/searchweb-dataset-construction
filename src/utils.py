@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 from typing import List
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse
 
 from keywords import (
     DOCS_TEXT,
@@ -113,10 +113,35 @@ def is_likely_pricing_link(link_text: str, href: str) -> bool:
 
 def is_strong_pricing_page(url: str, title: str, meta_description: str, text: str) -> bool:
     """페이지가 공개 가격/플랜 정보를 담은 강한 pricing 페이지인지 판정한다."""
-    blob = lower(" ".join([url, title, meta_description, text[:4000]]))
-    if has_pricing_url_hint(url):
+    content_blob = lower(" ".join([meta_description, text[:4000]]))
+    has_pricing_path = has_pricing_url_hint(url)
+    has_price_value = bool(PRICE_VALUE_RE.search(content_blob))
+    has_plan_term = any(
+        k in content_blob
+        for k in [
+            "pricing",
+            "plans",
+            "billing",
+            "subscription",
+            "monthly",
+            "annual",
+            "per seat",
+            "per user",
+            "요금",
+            "가격",
+            "플랜",
+            "구독",
+            "월",
+            "연",
+        ]
+    )
+    has_placeholder_signal = any(k in content_blob for k in ["coming soon", "under construction", "출시 예정", "준비 중"])
+
+    if has_price_value:
         return True
-    return keyword_hit(blob, STRONG_PRICING_TEXT) and bool(PRICE_VALUE_RE.search(blob))
+    if has_pricing_path and has_plan_term and not has_placeholder_signal:
+        return True
+    return False
 
 
 def is_allowed_external_docs_link(link_text: str, href: str) -> bool:
@@ -144,8 +169,6 @@ def likely_related_external_candidates(homepage_url: str) -> list[str]:
     """도메인 규칙 기반으로 추가 탐색할 외부 후보 URL 목록을 생성한다."""
     host = get_domain(homepage_url)
     candidates: list[str] = []
-    for path in ["/pricing", "/plans"]:
-        candidates.append(normalize_url(urljoin(homepage_url, path)))
     if host.endswith("chatgpt.com") or host.endswith("openai.com"):
         candidates.extend([
             "https://chatgpt.com/pricing",
