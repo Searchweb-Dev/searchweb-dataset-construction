@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from typing import Dict
 
-from keywords import AI_SITE_KEYWORDS, NON_AI_SITE_KEYWORDS
+from keywords import AI_SITE_STRONG_KEYWORDS, AI_SITE_WEAK_KEYWORDS, NON_AI_SITE_KEYWORDS
 from models import FetchResult
 from utils import get_domain, lower
 
@@ -26,10 +26,16 @@ class AiScopeClassifierMixin:
     def _infer_ai_site_scope(self, text_blob: str, homepage: FetchResult) -> Dict[str, object]:
         """수집 텍스트를 기반으로 평가 대상이 AI 사이트인지 판별한다."""
         normalized_blob = lower(text_blob)
-        ai_hits = {k for k in AI_SITE_KEYWORDS if k in normalized_blob}
-        non_ai_hits = {k for k in NON_AI_SITE_KEYWORDS if k in normalized_blob}
+        strong_ai_hits = self._collect_keyword_hits(normalized_blob, AI_SITE_STRONG_KEYWORDS)
+        weak_ai_hits = self._collect_keyword_hits(normalized_blob, AI_SITE_WEAK_KEYWORDS)
+        non_ai_hits = self._collect_keyword_hits(normalized_blob, NON_AI_SITE_KEYWORDS)
         if re.search(r"(?<![a-z0-9])ai(?![a-z0-9])", normalized_blob):
-            ai_hits.add("ai")
+            weak_ai_hits.add("ai")
+
+        ai_hits = strong_ai_hits | weak_ai_hits
+        ai_signal_score = (2 * len(strong_ai_hits)) + len(weak_ai_hits)
+        non_ai_signal_score = len(non_ai_hits)
+        ai_non_ai_margin = ai_signal_score - non_ai_signal_score
 
         domain = get_domain(homepage.final_url or homepage.url)
         known_ai_brand_hint = any(
@@ -47,42 +53,96 @@ class AiScopeClassifierMixin:
         )
         tld_ai_hint = domain.endswith(".ai")
 
-        if len(ai_hits) >= 2:
+        if len(strong_ai_hits) >= 2 and ai_non_ai_margin >= 1:
             return {
                 "is_ai_site": True,
-                "confidence": 0.96,
-                "reason": f"AI 관련 키워드 {len(ai_hits)}개를 확인함",
+                "confidence": 0.97,
+                "reason": f"강한 AI 신호 {len(strong_ai_hits)}개와 양수 마진을 확인함",
                 "ai_keyword_hits": sorted(ai_hits)[:8],
+                "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
+                "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
                 "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "ai_signal_score": ai_signal_score,
+                "non_ai_signal_score": non_ai_signal_score,
+                "ai_non_ai_margin": ai_non_ai_margin,
             }
-        if len(ai_hits) == 1 and len(non_ai_hits) <= 2:
+        if len(strong_ai_hits) >= 1 and (len(weak_ai_hits) >= 1 or ai_non_ai_margin >= 1) and non_ai_signal_score <= 3:
             return {
                 "is_ai_site": True,
-                "confidence": 0.76,
-                "reason": "AI 관련 핵심 키워드가 확인됨",
+                "confidence": 0.88,
+                "reason": "강한 AI 신호와 보조 신호를 함께 확인함",
                 "ai_keyword_hits": sorted(ai_hits)[:8],
+                "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
+                "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
                 "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "ai_signal_score": ai_signal_score,
+                "non_ai_signal_score": non_ai_signal_score,
+                "ai_non_ai_margin": ai_non_ai_margin,
             }
-        if known_ai_brand_hint and (len(ai_hits) >= 1 or len(non_ai_hits) <= 5):
+        if len(strong_ai_hits) == 0 and len(weak_ai_hits) >= 3 and ai_non_ai_margin >= 2 and non_ai_signal_score <= 2:
             return {
                 "is_ai_site": True,
-                "confidence": 0.82 if len(ai_hits) >= 1 else 0.66,
+                "confidence": 0.74,
+                "reason": "약한 AI 신호가 다수이며 비AI 신호 대비 우세함",
+                "ai_keyword_hits": sorted(ai_hits)[:8],
+                "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
+                "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
+                "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "ai_signal_score": ai_signal_score,
+                "non_ai_signal_score": non_ai_signal_score,
+                "ai_non_ai_margin": ai_non_ai_margin,
+            }
+        if known_ai_brand_hint and (len(strong_ai_hits) >= 1 or ai_non_ai_margin >= 1 or non_ai_signal_score <= 2):
+            return {
+                "is_ai_site": True,
+                "confidence": 0.84 if len(strong_ai_hits) >= 1 else 0.7,
                 "reason": "AI 브랜드 도메인 신호가 확인됨",
                 "ai_keyword_hits": sorted(ai_hits)[:8],
+                "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
+                "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
                 "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "ai_signal_score": ai_signal_score,
+                "non_ai_signal_score": non_ai_signal_score,
+                "ai_non_ai_margin": ai_non_ai_margin,
             }
-        if tld_ai_hint and len(non_ai_hits) <= 1:
+        if tld_ai_hint and (len(strong_ai_hits) >= 1 or (len(weak_ai_hits) >= 2 and non_ai_signal_score <= 1)):
             return {
                 "is_ai_site": True,
-                "confidence": 0.7,
-                "reason": ".ai/AI 브랜드 도메인 신호가 확인됨",
+                "confidence": 0.73,
+                "reason": ".ai 도메인과 AI 콘텐츠 신호를 확인함",
                 "ai_keyword_hits": sorted(ai_hits)[:8],
+                "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
+                "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
                 "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+                "ai_signal_score": ai_signal_score,
+                "non_ai_signal_score": non_ai_signal_score,
+                "ai_non_ai_margin": ai_non_ai_margin,
             }
         return {
             "is_ai_site": False,
-            "confidence": 0.95 if len(ai_hits) == 0 else 0.8,
-            "reason": "AI 서비스 신호가 부족하거나 일반 콘텐츠/뉴스 사이트 신호가 우세함",
+            "confidence": 0.96 if ai_signal_score == 0 else (0.9 if ai_non_ai_margin <= -2 else 0.82),
+            "reason": "AI 신호 대비 일반 콘텐츠 신호가 우세하거나 강한 AI 신호가 부족함",
             "ai_keyword_hits": sorted(ai_hits)[:8],
+            "strong_ai_keyword_hits": sorted(strong_ai_hits)[:8],
+            "weak_ai_keyword_hits": sorted(weak_ai_hits)[:8],
             "non_ai_keyword_hits": sorted(non_ai_hits)[:8],
+            "ai_signal_score": ai_signal_score,
+            "non_ai_signal_score": non_ai_signal_score,
+            "ai_non_ai_margin": ai_non_ai_margin,
         }
+
+    def _collect_keyword_hits(self, text_blob: str, keywords: set[str]) -> set[str]:
+        """키워드 집합 중 매칭된 항목을 반환한다."""
+        hits: set[str] = set()
+        for raw_keyword in keywords:
+            keyword = lower(raw_keyword)
+            if not keyword:
+                continue
+            if keyword.isalpha():
+                pattern = rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])"
+                if re.search(pattern, text_blob):
+                    hits.add(raw_keyword)
+                continue
+            if keyword in text_blob:
+                hits.add(raw_keyword)
+        return hits
