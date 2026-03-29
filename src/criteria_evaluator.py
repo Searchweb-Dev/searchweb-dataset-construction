@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from config import EvalConfig
 from ai_scope_classifier import AiScopeClassifierMixin
 from discovery_signals import DiscoverySignalMixin
-from keywords import ACTION_KEYWORDS, GENERIC_MARKETING_PHRASES, TASK_NOUNS
+from keywords import ACTION_KEYWORDS, DOCS_TEXT, GENERIC_MARKETING_PHRASES, POLICY_TEXT, TASK_NOUNS
 from models import ClearDescriptionLLM, CriterionResult, EvaluationResult, Evidence, FetchResult
 from page_fetcher import PageFetcher
 from status_policy import StatusPolicyMixin
@@ -32,7 +32,9 @@ class CriteriaEvaluatorMixin:
     ) -> Dict[str, CriterionResult]:
         """5개 품질 지표 결과를 생성해 dict로 반환한다."""
         ai_scope = extracted.get("ai_scope", {})
-        if ai_scope and not bool(ai_scope.get("is_ai_site", True)):
+        if ai_scope and str(ai_scope.get("scope_decision", "")).lower() == "non_ai":
+            return self._build_non_ai_scope_criteria(homepage, str(ai_scope.get("reason", "")))
+        if ai_scope and "scope_decision" not in ai_scope and not bool(ai_scope.get("is_ai_site", True)):
             return self._build_non_ai_scope_criteria(homepage, str(ai_scope.get("reason", "")))
         taxonomy = extracted.get("taxonomy", {})
         if (not ai_scope) and taxonomy and not bool(taxonomy.get("is_ai_site", True)):
@@ -68,6 +70,16 @@ class CriteriaEvaluatorMixin:
             )
             for name in names
         }
+
+    def _sample_ok_page_urls(self, all_pages: Dict[str, FetchResult], limit: int = 3) -> str:
+        """정상 수집된 페이지 URL 샘플 문자열을 반환한다."""
+        ok_urls = [p.final_url for p in all_pages.values() if p.ok and p.final_url]
+        if not ok_urls:
+            return "-"
+        sample = ok_urls[:limit]
+        if len(ok_urls) > limit:
+            return f"{', '.join(sample)} 외 {len(ok_urls) - limit}개"
+        return ", ".join(sample)
 
     def _eval_usable_now(self, homepage: FetchResult, all_pages: Dict[str, FetchResult], extracted: Dict[str, object]) -> CriterionResult:
         """즉시 사용 가능 경로(가입/로그인/설치/실행) 존재 여부를 평가한다."""
@@ -192,6 +204,8 @@ class CriteriaEvaluatorMixin:
     def _eval_pricing(self, homepage: FetchResult, all_pages: Dict[str, FetchResult], extracted: Dict[str, object]) -> CriterionResult:
         """공개 pricing/plan/licensing 신호 존재 여부를 평가한다."""
         pricing_pages: List[str] = extracted["pricing_pages"]
+        ok_page_count = sum(1 for p in all_pages.values() if p.ok)
+        url_sample = self._sample_ok_page_urls(all_pages)
         if pricing_pages:
             url = pricing_pages[0]
             page = next((p for p in all_pages.values() if p.final_url == url), None)
@@ -201,38 +215,116 @@ class CriteriaEvaluatorMixin:
             return CriterionResult(
                 name="has_pricing",
                 passed=self.config.contact_sales_counts_as_pricing,
-                reason=("문의(contact sales)만 있고 공개 가격/플랜 구조가 없음" if not self.config.contact_sales_counts_as_pricing else "문의 기반 가격 정책을 pricing으로 인정"),
+                reason=(
+                    "문의(contact sales)만 확인되고 공개 가격/플랜 구조는 확인되지 않음"
+                    if not self.config.contact_sales_counts_as_pricing
+                    else "문의 기반 가격 정책을 pricing으로 인정"
+                ),
                 confidence=0.8,
                 evidence=[Evidence(homepage.final_url, snippet(homepage.text), "contact_sales_only")],
             )
         if extracted["license_detected"] and self.config.license_counts_as_pricing_for_oss:
             return CriterionResult(name="has_pricing", passed=True, reason="OSS로 보이며 라이선스 정보가 존재함", confidence=0.7, evidence=[Evidence(homepage.final_url, snippet(homepage.text), "license_detected")])
-        return CriterionResult(name="has_pricing", passed=False, reason="공개 가격/플랜/라이선스 정보를 확인하지 못함", confidence=0.85, evidence=[Evidence(homepage.final_url, snippet(homepage.text), "homepage")])
+        return CriterionResult(
+            name="has_pricing",
+            passed=False,
+            reason=(
+                "공개 가격/플랜/라이선스 정보를 확인하지 못함 "
+                f"(확인 페이지={ok_page_count}개, pricing_pages=0, "
+                f"contact_sales_only={bool(extracted.get('contact_sales_only'))}, "
+                f"license_detected={bool(extracted.get('license_detected'))}, "
+                f"확인 URL 샘플={url_sample})"
+            ),
+            confidence=0.85,
+            evidence=[Evidence(homepage.final_url, snippet(homepage.text), "homepage")],
+        )
 
     def _eval_docs(self, homepage: FetchResult, all_pages: Dict[str, FetchResult], extracted: Dict[str, object]) -> CriterionResult:
         """docs/help/guide/faq 존재 여부를 평가한다."""
         docs_pages: List[str] = extracted["docs_pages"]
+        ok_pages = [p for p in all_pages.values() if p.ok]
+        docs_hint_count = 0
+        for p in ok_pages:
+            docs_blob = lower(" ".join([p.final_url, p.title, p.meta_description]))
+            if keyword_hit(docs_blob, DOCS_TEXT):
+                docs_hint_count += 1
+        url_sample = self._sample_ok_page_urls(all_pages)
         if docs_pages:
             url = docs_pages[0]
             page = next((p for p in all_pages.values() if p.final_url == url), None)
             evidence = [Evidence(url, snippet(page.text), "docs_page")] if page else []
             if extracted["faq_only_docs"] and not self.config.faq_counts_as_docs:
-                return CriterionResult(name="has_docs_or_help", passed=False, reason="FAQ만 있고 docs/help center로 보기 어렵다고 정책상 판단", confidence=0.7, evidence=evidence)
+                return CriterionResult(
+                    name="has_docs_or_help",
+                    passed=False,
+                    reason=(
+                        "FAQ 페이지만 확인됨("
+                        f"{url}) 및 config.faq_counts_as_docs=False로 docs/help 기준 미충족"
+                    ),
+                    confidence=0.7,
+                    evidence=evidence,
+                )
             return CriterionResult(name="has_docs_or_help", passed=True, reason="docs/help/guide/faq 등 사용 문서를 확인함", confidence=0.9, evidence=evidence)
-        return CriterionResult(name="has_docs_or_help", passed=False, reason="docs/help/guide/faq를 확인하지 못함", confidence=0.9, evidence=[Evidence(homepage.final_url, snippet(homepage.text), "homepage")])
+        return CriterionResult(
+            name="has_docs_or_help",
+            passed=False,
+            reason=(
+                "docs/help/guide/faq를 확인하지 못함 "
+                f"(확인 페이지={len(ok_pages)}개, docs 키워드 힌트 페이지={docs_hint_count}개, "
+                f"docs_pages=0, 확인 URL 샘플={url_sample})"
+            ),
+            confidence=0.9,
+            evidence=[Evidence(homepage.final_url, snippet(homepage.text), "homepage")],
+        )
 
     def _eval_policy(self, homepage: FetchResult, all_pages: Dict[str, FetchResult], extracted: Dict[str, object]) -> CriterionResult:
         """privacy/terms/data policy 관련 문서 존재 여부를 평가한다."""
         policy_pages: List[str] = extracted["policy_pages"]
+        ok_pages = [p for p in all_pages.values() if p.ok]
+        policy_hint_count = 0
+        for p in ok_pages:
+            policy_blob = lower(" ".join([p.final_url, p.title, p.meta_description]))
+            if keyword_hit(policy_blob, POLICY_TEXT):
+                policy_hint_count += 1
+        url_sample = self._sample_ok_page_urls(all_pages)
         if policy_pages:
-            url = policy_pages[0]
-            page = next((p for p in all_pages.values() if p.final_url == url), None)
-            evidence = [Evidence(url, snippet(page.text), "policy_page")] if page else []
-            blob = lower(" ".join([page.title, page.meta_description, page.text[:2000]]) if page else "")
-            if "terms" in blob and "privacy" not in blob and not self.config.terms_only_counts_as_policy:
-                return CriterionResult(name="has_privacy_or_data_policy", passed=False, reason="terms만 존재하고 privacy/data policy는 정책상 미인정", confidence=0.8, evidence=evidence)
-            return CriterionResult(name="has_privacy_or_data_policy", passed=True, reason="privacy/terms/data policy 관련 페이지를 확인함", confidence=0.95, evidence=evidence)
-        return CriterionResult(name="has_privacy_or_data_policy", passed=False, reason="privacy/terms/data policy를 확인하지 못함", confidence=0.9, evidence=[Evidence(homepage.final_url, snippet(homepage.text), "homepage")])
+            resolved_pages = [p for p in all_pages.values() if p.final_url in policy_pages]
+            evidence = [Evidence(p.final_url, snippet(p.text), "policy_page") for p in resolved_pages[:2]]
+            has_privacy_or_data_policy = False
+            has_terms_only = False
+            for page in resolved_pages:
+                blob = lower(" ".join([page.final_url, page.title, page.meta_description, page.text[:2000]]))
+                if any(tok in blob for tok in ["privacy", "privacy policy", "data policy", "data processing", "gdpr", "dpa", "개인정보"]):
+                    has_privacy_or_data_policy = True
+                    break
+                if "terms" in blob or "이용약관" in blob:
+                    has_terms_only = True
+            if has_privacy_or_data_policy:
+                return CriterionResult(name="has_privacy_or_data_policy", passed=True, reason="privacy/terms/data policy 관련 페이지를 확인함", confidence=0.95, evidence=evidence)
+            if has_terms_only and not self.config.terms_only_counts_as_policy:
+                first_url = policy_pages[0]
+                return CriterionResult(
+                    name="has_privacy_or_data_policy",
+                    passed=False,
+                    reason=(
+                        f"terms 성격 페이지만 확인됨({first_url}) 및 "
+                        "config.terms_only_counts_as_policy=False로 privacy/data policy 기준 미충족"
+                    ),
+                    confidence=0.8,
+                    evidence=evidence or [Evidence(homepage.final_url, snippet(homepage.text), "homepage")],
+                )
+            return CriterionResult(name="has_privacy_or_data_policy", passed=True, reason="terms 기반 policy를 확인함", confidence=0.85, evidence=evidence)
+        return CriterionResult(
+            name="has_privacy_or_data_policy",
+            passed=False,
+            reason=(
+                "privacy/terms/data policy를 확인하지 못함 "
+                f"(확인 페이지={len(ok_pages)}개, policy 키워드 힌트 페이지={policy_hint_count}개, "
+                f"policy_pages=0, 확인 URL 샘플={url_sample})"
+            ),
+            confidence=0.9,
+            evidence=[Evidence(homepage.final_url, snippet(homepage.text), "homepage")],
+        )
 
     def _calculate_weighted_scores(self, criteria: Dict[str, CriterionResult]) -> Tuple[Dict[str, float], float, Dict[str, float]]:
         """기준별 confidence와 가중치로 점수 상세/총점을 계산한다."""

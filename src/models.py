@@ -71,25 +71,25 @@ class EvaluationResult:
             "final_status": self.final_status,
             "passed_count": self.passed_count,
             "hard_pass": self.hard_pass,
-            "review_required": self.review_required,
-            "review_reasons": self.review_reasons,
-            "criteria": {
-                k: {
-                    "name": v.name,
-                    "passed": v.passed,
-                    "reason": v.reason,
-                    "confidence": v.confidence,
-                    "evidence": [asdict(e) for e in v.evidence],
-                }
-                for k, v in self.criteria.items()
-            },
-            "summary": self.summary,
-            "extracted": self.extracted,
         }
         if self.total_score is not None:
             out["total_score"] = round(self.total_score, 2)
         if self.score_breakdown is not None:
             out["score_breakdown"] = {k: round(v, 2) for k, v in self.score_breakdown.items()}
+        out["review_required"] = self.review_required
+        out["review_reasons"] = self.review_reasons
+        out["criteria"] = {
+            k: {
+                "name": v.name,
+                "passed": v.passed,
+                "reason": v.reason,
+                "confidence": v.confidence,
+                "evidence": [asdict(e) for e in v.evidence],
+            }
+            for k, v in self.criteria.items()
+        }
+        out["summary"] = self.summary
+        out["extracted"] = self.extracted
         return out
 
 
