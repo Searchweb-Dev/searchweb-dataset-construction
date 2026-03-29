@@ -45,6 +45,9 @@ class StatusPolicyMixin:
             return (False, [])
 
         reasons: List[str] = []
+        ai_scope = extracted.get("ai_scope", {})
+        if str(ai_scope.get("scope_decision", "")).lower() == "uncertain":
+            reasons.append("AI 사이트 판정이 경계 구간(uncertain)으로 수동 확인이 필요함")
         if criteria["clear_function_desc"].confidence < 0.75:
             reasons.append("기능 설명 판정 신뢰도가 낮음")
         if extracted["contact_sales_only"]:

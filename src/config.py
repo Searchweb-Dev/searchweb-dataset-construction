@@ -55,6 +55,9 @@ class EvalConfig:
     clear_desc_min_for_non_rejected: float = 0.50        # rejected 탈출 최소 clear_desc 점수
     docs_min_for_curated: float = 0.30                   # curated 최소 docs 점수
     privacy_min_for_curated: float = 0.30                # curated 최소 privacy/policy 점수
+    ai_scope_uncertain_margin_low: int = -1              # ai_scope 경계구간 하한(margin)
+    ai_scope_uncertain_margin_high: int = 2              # ai_scope 경계구간 상한(margin)
+    ai_scope_uncertain_non_ai_score_cap: int = 6         # ai_scope 경계구간에서 허용할 non-ai 점수 상한
 
     use_playwright: bool = True                          # Playwright 사용 여부
     playwright_headless: bool = False                    # 브라우저 headless 실행 여부

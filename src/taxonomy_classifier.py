@@ -33,12 +33,14 @@ class TaxonomyClassifierMixin:
         links_blob = lower(" ".join(link_blobs))
         combined_blob = " ".join([corpus, header_blob, links_blob])
         ai_scope = extracted.get("ai_scope", {})
+        scope_decision = str(ai_scope.get("scope_decision", "")).lower()
         is_ai_site = bool(ai_scope.get("is_ai_site", True))
 
         # 비AI 사이트는 평가 스코프 밖이므로 taxonomy 상세 분류를 생략한다.
-        if not is_ai_site:
+        if scope_decision == "non_ai" or (not scope_decision and not is_ai_site):
             return {
                 "is_ai_site": False,
+                "scope_decision": "non_ai",
                 "ai_site_confidence": ai_scope.get("confidence", 0.0),
                 "ai_site_reason": ai_scope.get("reason", "AI 사이트 아님"),
                 "ai_keyword_hits": ai_scope.get("ai_keyword_hits", []),
@@ -103,7 +105,8 @@ class TaxonomyClassifierMixin:
             "has_api": has_api,
             "pricing_model": pricing_model,
             "platforms": platforms,
-            "is_ai_site": True,
+            "is_ai_site": True if scope_decision != "non_ai" else False,
+            "scope_decision": scope_decision or ("ai" if is_ai_site else "non_ai"),
             "ai_site_confidence": ai_scope.get("confidence", 1.0),
             "ai_site_reason": ai_scope.get("reason", "AI 사이트로 판정됨"),
             "ai_keyword_hits": ai_scope.get("ai_keyword_hits", []),
