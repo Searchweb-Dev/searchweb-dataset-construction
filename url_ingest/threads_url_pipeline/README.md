@@ -3,6 +3,9 @@
 Threads 키워드 검색 결과에서 게시글 본문 URL을 추출하고, 도메인/서비스명 빈도를 집계하는 Python MVP입니다.  
 기본 실행 모드는 `MockThreadsClient`이며, 실제 API 연동은 환경변수로 전환합니다.
 
+관련 리서치 문서:
+- [threads_url_extraction_research.md](/mnt/c/Users/kang/Desktop/sw_test/url_ingest/threads_url_pipeline/threads_url_extraction_research.md)
+
 ## 1) 설치 방법
 ```bash
 python -m venv .venv
@@ -85,6 +88,7 @@ python -m app.cli run-all --keywords "AI 툴,AI 서비스"
 ## 프로젝트 구조
 ```text
 project_root/
+  threads_url_extraction_research.md
   app/
     __init__.py
     cli.py
