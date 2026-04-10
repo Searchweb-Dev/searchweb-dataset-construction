@@ -1,148 +1,252 @@
-# AI Tool/Service Dataset 구축 문서 (v1.1.1)
+# AI URL Classifier (v1.1.2)
 
-## 테스트 방법 (Bash 기준)
+AI 툴/서비스 후보 URL을 입력으로 받아, 공개 웹페이지에서 확인 가능한 신호만으로 해당 사이트가 실제 AI 서비스인지 판정하고, taxonomy와 품질 상태를 평가해 JSON으로 출력하는 로컬 CLI 파이프라인이다.
 
-현재 코드는 로컬 CLI 기반 평가 파이프라인까지만 구현되어 있다.
-아직 Postgres 등 외부 DB에 대한 세션 연결, 저장, 조회 연동은 포함되어 있지 않다.
+현재 구현 범위:
 
-### 가상환경 구축
+- URL 입력 수집
+- `requests` + `Playwright` 기반 페이지 fetch
+- 후보 pricing/docs/policy/product 페이지 탐색
+- AI 사이트 스코프 게이트 판정
+- taxonomy 분류
+- 5개 품질 기준 평가
+- weighted score 계산
+- review gate 반영
+- 최종 JSON 출력
+
+현재 구현 범위 밖:
+
+- Postgres 적재
+- ORM/세션 연결
+- insert/upsert
+- change log 저장
+- 자동 스케줄링
+- 실제 외부 LLM 연동
+- 자동화 테스트 코드
+
+상세 코드 분석 문서:
+
+- [research.md](/mnt/c/Users/kang/Desktop/sw_test/ai_url_classifier/research.md)
+
+## 1. 빠른 실행
+
+### 1.1 환경 준비
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh   # uv 설치
-uv venv --python 3.13                             # .venv 가상환경 생성 (파이썬 버전 3.13)
-source .venv/bin/activate                         # Bash에서 가상환경 활성화
-uv pip install -r requirements.txt                # 프로젝트 의존성 설치
-playwright install chromium                       # Chromium 브라우저 설치
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv venv --python 3.13
+source .venv/bin/activate
+uv pip install -r requirements.txt
+playwright install chromium
 ```
 
-### 평가 실행 방법
+의존성:
+
+- `requests`
+- `beautifulsoup4`
+- `playwright`
+
+### 1.2 실행 예시
 
 ```bash
-python run.py https://chatgpt.com                           # 한 개의 사이트 평가 실행
-python run.py https://chatgpt.com https://claude.com        # 여러 사이트를 한 번에 평가 실행
-python run.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"  # 쿼리스트링 URL 실행 예시
-python run.py data/site_url_list.txt                        # 텍스트 파일 URL 목록으로 평가 실행
-python run.py --url-file data/site_url_list.txt             # URL 목록 파일 경로를 명시적으로 지정
+python run.py https://chatgpt.com
+python run.py https://chatgpt.com https://claude.com
+python run.py "https://news.google.com/home?hl=ko&gl=KR&ceid=KR%3Ako"
+python run.py data/site_url_list.txt
+python run.py --url-file data/site_url_list.txt
 ```
 
-- 여러 URL은 공백으로 나열해 한 번에 실행할 수 있다.
-- `data/site_url_list.txt`처럼 줄 단위 URL 파일로도 실행 가능하다.
-- 쿼리스트링이 포함된 URL은 반드시 따옴표(`"` 또는 `'`)로 감싸서 실행한다.
-- 셸에서 `&`가 백그라운드 실행 기호로 해석되어 URL이 잘릴 수 있다.
+입력 규칙:
 
+- 여러 URL을 공백으로 나열해 한 번에 실행할 수 있다.
+- `.txt` 파일 경로를 직접 넘기면 줄 단위 URL 목록으로 읽는다.
+- `--url-file <path>`도 지원한다.
+- 쿼리스트링이 포함된 URL은 반드시 따옴표로 감싸야 한다.
+- 셸에서 `&`는 백그라운드 실행 기호로 해석되므로 URL이 잘릴 수 있다.
 
-## 1. 프로젝트 개요
+## 2. 출력 형태
 
-### 목적
-- SearchWeb 서비스에서 활용할 신뢰도 높은 AI Tool/Service Reference Database를 구축한다.
-- 단순 툴 나열이 아니라, 검증된 고품질 도구를 구조화해 검색/필터/비교/추천에 바로 사용 가능한 데이터셋을 만든다.
+출력은 표준 출력(stdout)으로 JSON 배열 하나를 내보낸다.
 
-### 배경
-- AI 서비스가 빠르게 증가하면서 사용자가 도구를 신뢰성 있게 선택하기 어려워졌다.
-- 초기에는 엄격한 수동 큐레이션으로 품질 기준을 고정하고, 이후 자동 파이프라인으로 확장한다.
+각 항목에는 아래 정보가 포함된다.
 
-### 확장 방향
-- 1차: `200개 이하`의 고품질 curated 데이터셋 구축.
-- 2차: JTBD/요구조건 기반 추천(RAG 포함)으로 확장.
+- 입력 URL과 정규화 URL
+- `predicted_status`, `final_status`
+- `passed_count`, `hard_pass`
+- `review_required`, `review_reasons`
+- 5개 criterion 상세
+- `summary`
+- `extracted`
+- `total_score`, `score_breakdown`
 
----
+즉, 이 프로젝트는 단순 pass/fail 스크립트가 아니라, 근거와 중간 신호를 포함한 분석 결과 JSON 생성기다.
 
-## 2. 아키텍처 원칙
+## 3. 현재 코드가 실제로 하는 일
 
-### 기본 원칙
-- 서비스 DB와 수집/정제/검증 파이프라인을 분리한다.
-- 서비스는 검증 완료 데이터(`curated`, 필요 시 `incubating`)만 읽기 중심으로 사용한다.
-- 현재 저장소에는 DB 세션 생성, 커넥션 관리, ORM/쿼리 레이어가 아직 구현되어 있지 않다.
+파이프라인 기본 순서는 아래와 같다.
 
-### 논리 구조
-```text
-[External Data Pipeline]
-        ↓
-(정제/분류/검증 완료 데이터)
-        ↓
-[DB Load / Upsert Layer]
-        ↓
-[Postgres - Service DB]
-        ↓
-[SearchWeb Serving]
-```
+1. 홈페이지와 후보 페이지 수집
+2. 구조화 신호 추출
+3. AI 사이트 스코프 판정
+4. taxonomy 분류
+5. 5개 품질 기준 평가
+6. weighted score 계산과 1차 상태 예측
+7. review gate 반영과 최종 상태 확정
+8. 결과 summary 생성
 
-### 분리 이유
-- 크롤링/LLM 실패나 지연이 서비스 응답에 영향을 주지 않게 하기 위함.
-- LLM 비용/재시도/스케줄링을 독립적으로 운영하기 위함.
-- 안정성, 추적성, 확장성을 확보하기 위함.
+핵심 특징:
 
----
+- 먼저 `AI 사이트인지`를 판정한 뒤 나머지 평가를 수행한다.
+- `non_ai`로 판정되면 taxonomy 상세 분류와 품질 평가는 사실상 제외 모드로 들어간다.
+- `curated`는 단순 고득점이 아니라 review-free 상태여야 최종 확정된다.
 
-## 3. 현재 코드 모듈 구조 (반영 완료)
+## 4. 상태 모델
 
-실행 엔트리포인트는 루트 `run.py`이며, 실제 구현 모듈은 `src/` 아래에 배치되어 있다.
+현재 최종 상태는 아래 3개만 사용한다.
 
-- `run.py` (루트 엔트리포인트)
-  - `src/`를 import 경로에 추가한 뒤 `pipeline.main()` 호출
-- `src/pipeline.py`
-  - 단일 실행 파일(CLI)
-  - URL 목록을 받아 파이프라인 실행
-  - 파이프라인 단계 정의(fetch → extract → ai_scope → classify → criteria → score/status → review → summary)
-  - 현재 구현은 평가 결과 생성까지 담당하며, DB 적재 단계는 아직 포함하지 않음
-  - `PageFetcher`를 생성하고 `WeightedQualityEvaluator`에 주입
-  - URL 병렬 평가 및 후보 URL 병렬 수집 실행
-  - `DEFAULT_PIPELINE_STEPS` 포함
-- `src/config.py`
-  - 파이프라인/평가/수집 관련 전역 설정(`EvalConfig`)
-  - `max_sub_tasks`, 병렬 옵션, Playwright 옵션 포함
-  - `ai_scope_uncertain_*` 경계구간 임계값 포함
-- `src/models.py`
-  - 결과 데이터 구조(`FetchResult`, `CriterionResult`, `EvaluationResult` 등)
-- `src/fetchers/page_fetcher.py`
-  - requests + playwright 기반 페이지 수집
-  - lightweight candidate fetch, 링크/본문 길이 상한 적용
-- `src/classifiers/discovery_signals.py`
-  - 후보 URL 수집/구조화 신호(extracted) 추출
-  - known-domain(OpenAI/ChatGPT) 관련 외부 docs/policy/pricing 후보를 fallback 조건과 무관하게 포함
-- `src/classifiers/ai_scope_classifier.py`
-  - 평가 대상이 AI 사이트인지 스코프 게이트 판정
-  - `AI strong/weak` + `NON_AI strong/weak` 가중 점수(`2*strong + weak`)와 margin 기반 규칙 적용
-  - 판정 결과를 `ai` / `uncertain` / `non_ai`로 구분
-- `src/classifiers/taxonomy_classifier.py`
-  - `scope_decision=non_ai`일 때 taxonomy 상세 분류를 스킵
-  - `scope_decision=ai|uncertain`일 때 규칙 기반 카테고리/태그 분류
-  - sub-task는 `config.max_sub_tasks`까지 반환
-- `src/classifiers/criteria_evaluator.py`
-  - 5개 criteria 평가
-  - 공통 evaluator 베이스 및 최종 `EvaluationResult` 조립
-  - `fetcher`를 생성하지 않고 외부(메인)에서 주입받아 사용
-  - 가중치 점수 기반 상태 판정 evaluator(`WeightedQualityEvaluator`)
-- `src/classifiers/status_policy.py`
-  - review gate 및 summary 정책
-  - `scope_decision=uncertain`이면 수동 검토 사유 자동 추가
-- `src/keywords.py`
-  - 카테고리/서브태스크/플랫폼/정책 판정용 키워드 사전
-  - AI/NON_AI 키워드를 strong/weak 세트로 분리해 관리
-- `src/utils.py`
-  - URL 정규화, 텍스트 정리, 키워드 매칭, 링크 판정 유틸 함수
+- `curated`
+- `incubating`
+- `rejected`
 
----
+별도 스코프 판정 신호:
 
-## 4. 데이터 범위
+- `ai`
+- `uncertain`
+- `non_ai`
 
-### 포함 대상
-- 생성형 AI 기반 SaaS
-- AI 기능 포함 자동화/워크플로우 툴
-- API 제공 AI 서비스
-- 실사용 가능한 오픈소스 AI 툴
-- 진입장벽이 낮은 AI 서비스
+중요한 점:
 
-### 제외 대상
-- 뉴스/블로그/정보성 콘텐츠
-- 기능 불명확 랜딩 페이지
-- 접근 불가/종료 서비스
+- `scope_decision`은 상태값이 아니라 평가 흐름 제어용 신호다.
+- `predicted_status`가 `curated`라도 review gate에 걸리면 `final_status`는 `incubating`으로 내려갈 수 있다.
 
----
+## 5. 품질 평가 기준
 
-## 5. 분류 기준 (Taxonomy)
+현재 구현은 아래 5개 criterion을 평가한다.
 
-### 5.1 Top-level Category (Primary 1개 필수)
+- `usable_now`
+- `clear_function_desc`
+- `has_pricing`
+- `has_docs_or_help`
+- `has_privacy_or_data_policy`
+
+### 5.1 `usable_now`
+
+실제 사용/가입/설치/실행 경로가 공개돼 있는지 본다.
+
+주요 신호:
+
+- CTA 텍스트
+- 동일 도메인 내 usable URL 힌트
+- docs 페이지 내 install/quickstart/self-hosted 신호
+- waitlist/coming soon/early access 같은 부정 신호
+
+### 5.2 `clear_function_desc`
+
+서비스가 “누구를 위해 무엇을 어떻게 하는지” 설명이 충분히 구체적인지 평가한다.
+
+현재 기본 구현은 규칙 기반 문장 점수화다.
+
+### 5.3 `has_pricing`
+
+pricing/plans/billing 페이지 또는 OSS 라이선스 신호를 본다.
+
+기본 정책:
+
+- 공개 pricing 페이지가 있으면 통과
+- `contact sales`만 있으면 기본적으로 실패
+- OSS license는 제한적으로 pricing 근거로 인정
+
+### 5.4 `has_docs_or_help`
+
+docs/help/guide/faq 페이지 존재 여부를 본다.
+
+기본 정책:
+
+- FAQ only도 기본 설정에서는 docs로 인정
+
+### 5.5 `has_privacy_or_data_policy`
+
+privacy/data policy/terms/security 문서 존재 여부를 본다.
+
+기본 정책:
+
+- terms only도 기본 설정에서는 policy로 인정
+
+## 6. weighted score 정책
+
+현재 상태 예측은 단순 count 방식이 아니라 weighted score 방식이다.
+
+기본 가중치:
+
+- `usable_now = 0.30`
+- `clear_function_desc = 0.25`
+- `has_docs_or_help = 0.20`
+- `has_privacy_or_data_policy = 0.20`
+- `has_pricing = 0.05`
+
+하한 게이트:
+
+- `usable_now >= 0.60`
+- `clear_function_desc >= 0.50`
+
+상태 컷:
+
+- `curated >= 85.0`
+- `incubating >= 65.0`
+- 그 외 `rejected`
+
+추가 curated 조건:
+
+- docs score 최소치 충족
+- privacy/policy score 최소치 충족
+
+즉, 가격 공개 여부는 비교적 낮은 비중이고, 실사용 가능성과 기능 설명 명확성이 더 중요하다.
+
+## 7. AI 사이트 스코프 게이트
+
+현재 구현은 AI 여부를 먼저 판정한다.
+
+판정 방식:
+
+- strong AI keywords
+- weak AI keywords
+- strong non-AI keywords
+- weak non-AI keywords
+
+점수식:
+
+- `ai_signal_score = 2 * strong_ai + weak_ai`
+- `non_ai_signal_score = 2 * strong_non_ai + weak_non_ai`
+- `margin = ai_signal_score - non_ai_signal_score`
+
+출력:
+
+- `ai`
+- `uncertain`
+- `non_ai`
+
+보조 신호:
+
+- known AI brand domain
+- `.ai` TLD
+
+즉, 이 프로젝트는 taxonomy보다 먼저 “애초에 AI 툴/서비스 평가 대상인지”를 걸러낸다.
+
+## 8. taxonomy 분류
+
+AI 사이트로 간주된 경우에만 taxonomy를 상세 분류한다.
+
+출력 범주:
+
+- `primary_category`
+- `sub_tasks`
+- `meta_categories`
+- `platforms`
+- `pricing_model`
+- `one_line_summary`
+
+primary category 후보:
+
 - Writing & Docs
 - Coding
 - Research
@@ -152,228 +256,140 @@ python run.py --url-file data/site_url_list.txt             # URL 목록 파일 
 - Meeting & Sales
 - DevOps / Security
 
-### 5.2 Sub-task (다중 태그)
+sub-task는 선택된 primary category 안에서만 평가한다.
 
-#### Writing & Docs
-- 이메일 작성, 보고서 작성, PRD 작성, 제안서 작성
-- 블로그/콘텐츠 작성, 요약, 번역, 교정, 재작성, 문체 변환
+즉, primary category가 틀리면 sub-task도 연쇄적으로 왜곡될 수 있다.
 
-#### Coding
-- IDE 에이전트, 코드 생성, 코드 리뷰, 테스트 코드 생성
-- 리팩토링, 버그 분석, 코드 설명, API 스펙/주석 생성
+## 9. 수집 전략
 
-#### Research
-- 웹 리서치, 경쟁사 분석, 논문 분석, 시장 조사
-- 리포트 분석, 트렌드 분석, 문서 QA, 데이터 수집 요약
+`PageFetcher`는 `requests`와 `Playwright`를 혼합 사용한다.
 
-#### Design & Creative
-- 이미지/영상 생성 및 편집
-- 프레젠테이션 제작, 브랜딩/로고, UI 컨셉, 목업 생성
+기본 원칙:
 
-#### Data & Analytics
-- SQL 생성/튜닝, 데이터 정제, 대시보드/시각화
-- A/B 테스트 분석, 통계 분석, 리포트 자동 생성
+- 우선 `requests`
+- 결과가 빈약하거나 challenge 페이지면 `Playwright`
+- 특정 도메인은 Playwright 강제
+- 둘 다 있으면 더 풍부한 결과를 선택
 
-#### Ops & Automation
-- 워크플로우 자동화, API 연동, 티켓 자동 분류
-- CS 응답 자동화, 알림 자동화, 문서 자동 처리, 스케줄링
+강제 Playwright 도메인:
 
-#### Meeting & Sales
-- 회의 요약/녹취 분석, 액션 아이템 추출
-- CRM 입력 자동화, 세일즈 이메일/스크립트/제안서 자동화
+- `chatgpt.com`
+- `cursor.com`
+- `perplexity.ai`
 
-#### DevOps / Security
-- 로그 분석, 장애 원인 분석, 취약점 분석
-- 정책 생성, 컴플라이언스 점검, PII 마스킹, 권한 분석
+추가로 후보 페이지도 별도로 수집한다.
 
-> 구현 메모: 현재 코드는 `max_sub_tasks` 설정값(`config.py`)으로 반환 개수를 제한한다.
+후보 종류:
 
-### 5.3 Meta Category (옵션)
-- Create
-- Analyze
-- Build
-- Automate
-- Communicate
-- Secure
+- `pricing`
+- `docs`
+- `policy`
+- `product`
+- `probe`
 
----
+fallback probe path:
 
-## 6. 품질 평가 지표
+- `/pricing`
+- `/plans`
+- `/docs`
+- `/help`
+- `/support`
+- `/privacy`
+- `/privacy-policy`
+- `/terms`
 
-### 현재 코드 기준 신뢰도 판단 로직
+## 10. anti-bot 대응
 
-- 1차 게이트: AI 사이트 스코프 판정(`scope_decision=ai|uncertain|non_ai`)
-  - `non_ai`: 평가 제외 처리
-  - `ai`: 정상 평가
-  - `uncertain`: 정상 평가 + 수동 검토 대상 플래그
-- 2차 평가: 5개 criteria(`usable_now`, `clear_function_desc`, `has_pricing`, `has_docs_or_help`, `has_privacy_or_data_policy`) 산출
-- 3차 점수화: criteria별 confidence와 가중치로 총점(0~100) 계산
-- 4차 상태 판정: 하한 게이트 + 총점 임계값으로 `curated` / `incubating` / `rejected` 결정
-- 5차 검수 게이트: 신뢰도 낮은 신호 존재 시 `review_required` 부여, 필요 시 `curated`에서 `incubating`으로 다운그레이드
+현재 fetcher는 Cloudflare/captcha/challenge 페이지를 감지한다.
 
-### AI 스코프 게이트(현재 규칙)
+대응 방식:
 
-- AI 점수: `2 * strong_ai_hits + weak_ai_hits`
-- 비AI 점수: `2 * strong_non_ai_hits + weak_non_ai_hits`
-- margin: `ai_signal_score - non_ai_signal_score`
-- 경계구간(`uncertain`) 기본 임계값:
-  - `ai_scope_uncertain_margin_low = -1`
-  - `ai_scope_uncertain_margin_high = 2`
-  - `ai_scope_uncertain_non_ai_score_cap = 6`
+- Playwright 대기 및 재시도
+- challenge 감지 시 `anti_bot_blocked` 신호 생성
+- 정보 부족으로 완전 탈락하는 것을 막기 위해 일부 경우 `incubating` 완충 처리
 
-### 공통 5개 지표 (criteria)
-- `usable_now`: 실제 즉시 사용 가능 여부
-- `usable_now` 판정 신호: CTA 텍스트 + 동일 도메인 진입 URL 힌트(`/create`, `/studio`, `/app`, `/editor` 등)
-- `clear_function_desc`: 기능 설명 명확성
-- `has_pricing`: 요금/플랜 공개 여부
-- `has_docs_or_help`: 문서/도움말 존재 여부
-- `has_privacy_or_data_policy`: 정책 페이지 존재 여부
+즉, anti-bot으로 인해 본문 수집이 제한된 사이트를 무조건 `rejected`로 보내지 않는다.
 
-### Weighted 기준
-- 가중치와 총점(0~100)을 함께 사용
-- 하한 게이트(usable/desc/docs/policy 최소치) + 상태 컷(`curated`, `incubating`) 적용
-- 기본 가중치(현재 코드):
-  - `usable_now=0.30`
-  - `clear_function_desc=0.25`
-  - `has_docs_or_help=0.20`
-  - `has_privacy_or_data_policy=0.20`
-  - `has_pricing=0.05`
-- rejected 탈출 하한:
-  - `usable_now >= 0.60`
-  - `clear_function_desc >= 0.50`
-- 상태 점수 컷:
-  - `curated >= 85.0` (단, `docs >= 0.30`, `policy >= 0.30` 추가 조건)
-  - `incubating >= 65.0`
-  - 그 외 `rejected`
-- 추가 검수 규칙:
-  - `scope_decision=uncertain`이면 `review_required=True`
+## 11. 병렬 처리
 
----
+병렬성은 두 층에 있다.
 
-## 7. 상태 모델
+- URL 목록 병렬 평가
+- 개별 URL 내부 후보 페이지 병렬 fetch
 
-- 현재 코드의 `predicted_status` / `final_status`는 아래 3가지만 사용:
-  - `curated`
-  - `incubating`
-  - `rejected`
-- `ai_scope`의 `scope_decision( ai / uncertain / non_ai )`는 상태값이 아니라 평가 스코프/검수 흐름 제어용 신호다.
-- `review gate`에서 `curated`가 `incubating`으로 다운그레이드될 수 있다.
-- `discovered`, `validated`, `deprecated`는 데이터 운영 레이어에서 확장 가능한 개념 상태로 유지한다.
+기본 설정:
 
----
+- URL 평가 워커: `3`
+- 후보 페이지 fetch 워커: `4`
 
-## 8. 데이터 파이프라인 (현재 구현 단계)
+중첩 병렬 시 후보 워커는 자동 축소될 수 있다.
 
-`src/pipeline.py`의 `DEFAULT_PIPELINE_STEPS` 기준 실행 순서:
+이유:
 
-1. 홈페이지 및 후보 페이지 수집 (`step_fetch_and_collect_pages`)
-2. 구조화 신호 추출 (`step_extract_signals`)
-3. AI 사이트 스코프 게이트 판정 (`step_assess_ai_scope`)
-4. 분류 체계(Taxonomy) 판정 (`step_classify_taxonomy`)
-5. 5개 품질 기준 평가 (`step_evaluate_criteria`)
-6. 점수 계산 및 1차 상태 예측 (`step_score_and_predict_status`)
-7. 검수 게이트 반영 및 최종 상태 확정 (`step_review_and_finalize_status`)
-8. 결과 요약문 생성 (`step_build_summary`)
+- 과도한 스레드 증가 방지
+- URL 병렬과 후보 병렬의 충돌 완화
 
-운영 확장(중복 제거/DB 반영/변경로그/주기 재검증)은 별도 데이터 파이프라인 레이어에서 연결한다.
-현재 저장소 범위에는 DB 적재 파이프라인과 세션 연결 코드가 포함되지 않는다.
-
-### 목표 파이프라인의 최종 단계
-
-이 문서는 데이터셋 구축 파이프라인을 설명하므로, 운영 기준의 최종 단계에는 DB 적재가 포함되어야 한다.
-
-1. 홈페이지 및 후보 페이지 수집
-2. 구조화 신호 추출
-3. AI 사이트 스코프 게이트 판정
-4. 분류 체계(Taxonomy) 판정
-5. 5개 품질 기준 평가
-6. 점수 계산 및 상태 예측
-7. 검수 게이트 반영
-8. 결과 요약 및 적재용 레코드 정규화
-9. Service DB(Postgres) 적재 또는 upsert
-10. 변경 이력(Change Log) 기록 및 후속 재검증 대상 등록
-
-### DB 적재 단계에서 해야 할 일
-
-- 평가 결과를 서비스 스키마에 맞는 레코드로 정규화
-- 기준 URL 또는 canonical URL 기준으로 중복 여부 판정
-- 신규 데이터는 insert, 기존 데이터는 upsert
-- 상태, 점수, 가격/정책 변경 여부를 비교해 변경 이력 기록
-- 적재 성공/실패 결과와 재시도 대상을 분리 관리
-
-현재 저장소에는 위 단계를 수행하는 DB 세션 연결, insert/upsert, 변경 이력 기록 로직이 아직 구현되어 있지 않다.
-
----
-
-## 9. LLM 구조화 단계
+## 12. LLM 사용 여부
 
 현재 코드 기준:
-- taxonomy 분류(`primary_category`, `sub_tasks`, `meta_categories`, `platforms` 등)는 **규칙 기반**이다.
-- LLM은 `clear_function_desc` 기준에서만 선택적으로 사용 가능하다(`enable_llm_for_clear_desc=True`).
-- 기본 실행(`src/pipeline.py`)은 `use_llm=False`로 동작한다.
-- `ai_scope` 판정 역시 현재는 전부 규칙 기반이며 LLM/모델 재판정 단계는 구현되어 있지 않다.
-- `use_llm=True`로 바꿔도 현재 저장소에서는 외부 LLM API를 직접 호출하지 않는다.
-- 현재 연결되는 구현체는 `DummyLLM`이며, 이는 실제 모델이 아니라 LLM 연동 자리를 검증하기 위한 테스트용 스텁이다.
-- `DummyLLM`은 `candidate_sentence`에 대한 단순 키워드 휴리스틱으로 `passed`, `confidence`, `reason`, `summary` 형식의 응답만 흉내 낸다.
 
-### 실제 LLM을 사용하려면
+- taxonomy는 규칙 기반이다.
+- AI 스코프 판정도 규칙 기반이다.
+- LLM은 `clear_function_desc`에만 선택적으로 연결 가능한 구조다.
+- 기본 실행은 `use_llm=False`다.
+- 현재 연결된 구현체는 실제 모델이 아니라 `DummyLLM` 스텁이다.
 
-- `ClearDescriptionLLM` 인터페이스를 구현하는 실제 LLM 클래스가 필요하다.
-- 해당 구현체에서 모델 호출, API 키 관리, 예외 처리, 응답 파싱을 담당해야 한다.
-- 이후 `src/pipeline.py`에서 `DummyLLM` 대신 실제 구현체를 주입해야 한다.
-- 현재 구조상 실제 LLM 판정은 `clear_function_desc` 기준에만 연결되어 있다.
+즉, 현재 저장소는 “LLM 연동이 가능한 자리”만 열어둔 상태고, 실제 외부 LLM API 호출은 구현되어 있지 않다.
 
-운영 방식(자동 반영/검수 비율/배치 주기)은 데이터 엔지니어링 정책으로 관리한다.
+## 13. 현재 한계
 
----
+- 자동화 테스트 코드가 없다.
+- DB 적재 코드가 없다.
+- 출력은 stdout JSON뿐이다.
+- query string이 URL 정규화 과정에서 제거된다.
+- 키워드 사전 품질에 크게 의존한다.
+- known-domain 예외 규칙이 일부 하드코딩돼 있다.
 
-## 10. DB 설계 요구사항 (Postgres)
+즉, 현재 구조는 실용적인 로컬 evaluator MVP이지만, 운영 품질을 높이려면 테스트와 룰 관리 체계가 다음 단계다.
 
-### 필수 요구
-- 카테고리 기반 필터링
-- 점수 기반 정렬
-- 상태 기반 조회
-- 정책/가격 변경 추적
-- Change Log 유지
+## 14. 디렉터리 구조
 
-### 적재 관점 요구
-- 사이트의 canonical 식별자 기준 upsert 가능해야 함
-- 평가 시점(`evaluated_at`)과 적재 시점(`ingested_at`)을 분리해 저장해야 함
-- 현재 스냅샷 테이블과 변경 이력 테이블을 분리해 관리해야 함
-- 재검증 주기 대상과 적재 실패 대상을 추적할 수 있어야 함
+```text
+ai_url_classifier/
+  README.md
+  research.md
+  requirements.txt
+  run.py
+  data/
+    site_url_list.txt
+  src/
+    config.py
+    keywords.py
+    models.py
+    pipeline.py
+    utils.py
+    fetchers/
+      __init__.py
+      page_fetcher.py
+    classifiers/
+      __init__.py
+      ai_scope_classifier.py
+      criteria_evaluator.py
+      discovery_signals.py
+      status_policy.py
+      taxonomy_classifier.py
+```
 
-### 설계 선택지
-- 정규화 중심 vs JSONB 중심은 성능/운영 전략에 따라 결정
+## 15. 향후 확장
 
----
+현재 README는 실제 구현 범위를 기준으로 작성했다.  
+향후 별도 단계에서 아래를 추가할 수 있다.
 
-## 11. 다음 단계
+- Postgres 적재
+- insert/upsert
+- change log 저장
+- 재검증 스케줄러
+- 대표 사이트셋 기반 회귀 테스트
+- 실제 LLM 연동
 
-- 현재 코드베이스 다음 작업의 우선순위: 기존 DB 테이블 정의와 컬럼 정의를 현재 평가 결과 구조에 맞게 수정하는 것.
-- 특히 `primary_category`, `sub_tasks`, `meta_categories`, `platforms`, criteria 점수, `predicted_status`, `final_status`, `review_reasons`, `summary`, 변경 이력 컬럼 반영 여부의 우선 정리 필요.
-- 이후 DB 세션 연결, insert/upsert, Change Log 적재 로직 구현을 위한 DB 스키마 수정 선행 필요.
-
----
-
-## 12. 운영 전략
-
-### 정기 검증
-- 분기별 재검토
-- 가격 변경 감지
-- 정책 변경 감지
-- 서비스 종료 감지
-
-### Change Log 필수
-- 점수 변경
-- 정책 변경
-- 카테고리 변경
-- 상태 변경
-
----
-
-## 13. MVP 목표
-
-- 200개 이하 curated AI Tool
-- 전부 검증 통과
-- 구조화 완료
-- 검색/필터/정렬 가능
+이 항목들은 현재 코드에 구현된 기능이 아니라, 다음 단계 설계 대상이다.
