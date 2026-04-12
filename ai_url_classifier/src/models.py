@@ -61,6 +61,7 @@ class EvaluationResult:
     extracted: Dict[str, object]
     total_score: Optional[float] = None
     score_breakdown: Optional[Dict[str, float]] = None
+    management: Optional[Dict[str, object]] = None
 
     def to_dict(self) -> Dict[str, object]:
         """결과를 JSON 직렬화 가능한 dict 형태로 변환한다."""
@@ -90,6 +91,8 @@ class EvaluationResult:
         }
         out["summary"] = self.summary
         out["extracted"] = self.extracted
+        if self.management is not None:
+            out["management"] = self.management
         return out
 
 

@@ -7,7 +7,6 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 from models import CriterionResult, FetchResult
-from utils import get_domain
 
 
 class StatusPolicyMixin:
@@ -57,13 +56,11 @@ class StatusPolicyMixin:
         if bool(extracted.get("anti_bot_blocked")):
             reasons.append("anti-bot/challenge 응답으로 인해 신뢰 가능한 본문 수집이 제한됨")
         if homepage.fetched_by == "requests" and self.config.use_playwright and bool(extracted.get("playwright_enabled", True)):
-            domain = get_domain(homepage.final_url)
-            forced_playwright_domain = any(domain.endswith(d) for d in self.config.always_playwright_domains)
             thin_content = (
                 len(homepage.text or "") < self.config.min_text_len_for_static_success
                 or len(homepage.links or []) < self.config.min_links_for_static_success
             )
-            if bool(extracted.get("anti_bot_blocked")) or forced_playwright_domain or thin_content:
+            if bool(extracted.get("anti_bot_blocked")) or thin_content:
                 reasons.append("Playwright 재수집 없이 requests 결과만 사용됨")
         if predicted_status == "curated":
             if not criteria["has_docs_or_help"].passed:

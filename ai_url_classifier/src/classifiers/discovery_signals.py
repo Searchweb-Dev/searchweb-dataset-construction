@@ -157,6 +157,8 @@ class DiscoverySignalMixin:
 
         return {
             "homepage_accessible": homepage.ok,
+            "homepage_final_url": homepage.final_url,
+            "homepage_title": homepage.title,
             "has_waitlist_signal": keyword_hit(homepage_blob + " " + link_blob, NEGATIVE_USE_TEXT),
             "has_positive_use_signal": keyword_hit(homepage_blob + " " + link_blob, POSITIVE_USE_TEXT),
             "pricing_pages": list(dict.fromkeys(page_map["pricing_pages"])),

@@ -58,6 +58,9 @@ class EvalConfig:
     ai_scope_uncertain_margin_low: int = -1              # ai_scope 경계구간 하한(margin)
     ai_scope_uncertain_margin_high: int = 2              # ai_scope 경계구간 상한(margin)
     ai_scope_uncertain_non_ai_score_cap: int = 6         # ai_scope 경계구간에서 허용할 non-ai 점수 상한
+    taxonomy_low_confidence_threshold: float = 0.60      # taxonomy low-confidence 수동 검수 임계값
+    max_change_history_per_tool: int = 50                # tool registry에서 도구별 보관할 변경 이력 최대 개수
+    rule_version: str = "ai-url-classifier-rules-v1"     # 결과/이력에 기록할 규칙 버전 문자열
 
     use_playwright: bool = True                          # Playwright 사용 여부
     playwright_headless: bool = False                    # 브라우저 headless 실행 여부
@@ -74,11 +77,6 @@ class EvalConfig:
 
     min_text_len_for_static_success: int = 700           # requests 결과 최소 본문 길이 기준
     min_links_for_static_success: int = 8                # requests 결과 최소 링크 수 기준
-    always_playwright_domains: Tuple[str, ...] = (
-        "chatgpt.com",
-        "cursor.com",
-        "perplexity.ai",
-    )                                                    # Playwright 우선 적용 도메인
     fallback_probe_paths: Tuple[str, ...] = (
         "/pricing",
         "/plans",

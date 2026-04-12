@@ -17,7 +17,7 @@ from urllib3.util.retry import Retry
 
 from config import EvalConfig
 from models import FetchResult
-from utils import get_domain, lower, normalize_url, squash_ws
+from utils import lower, normalize_url, squash_ws
 
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
@@ -48,15 +48,6 @@ class PageFetcher:
     def fetch(self, url: str, lightweight: bool = False) -> FetchResult:
         """URL을 수집하고 requests/playwright 중 더 나은 결과를 반환한다."""
         normalized = normalize_url(url)
-        if self.playwright_enabled and self._always_use_playwright(normalized):
-            pw_result = self._fetch_with_playwright(normalized, lightweight=lightweight)
-            if pw_result.ok:
-                return pw_result
-            req_result = self._fetch_with_requests(normalized)
-            if self._is_playwright_unavailable_error(pw_result.error):
-                return req_result
-            return self._choose_better_result(req_result, pw_result)
-
         req_result = self._fetch_with_requests(normalized)
         if not self.playwright_enabled:
             return req_result
@@ -97,11 +88,6 @@ class PageFetcher:
                         fetched_by="requests",
                     )
         return results
-
-    def _always_use_playwright(self, url: str) -> bool:
-        """도메인 정책상 playwright 강제 대상인지 확인한다."""
-        domain = get_domain(url)
-        return any(domain.endswith(d) for d in self.config.always_playwright_domains)
 
     def _create_session(self) -> requests.Session:
         """thread-safe 병렬 수집을 위해 스레드별 requests session을 생성한다."""
