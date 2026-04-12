@@ -216,3 +216,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 .codex
+
+# Keep ai_url_classifier result directory, ignore generated outputs inside it.
+!ai_url_classifier/result/
+ai_url_classifier/result/*
+!ai_url_classifier/result/.gitkeep
