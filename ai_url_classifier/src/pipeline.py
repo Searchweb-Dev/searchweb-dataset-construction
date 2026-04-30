@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
 import os
 import re
 import sys
@@ -13,6 +14,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 from config import EvalConfig
 from classifiers.criteria_evaluator import WeightedQualityEvaluator
@@ -51,8 +54,18 @@ def _build_shared_text_cache(all_pages: Dict[str, Any]) -> Dict[str, str]:
 def step_fetch_and_collect_pages(evaluator: Any, ctx: PipelineContext) -> None:
     """홈페이지와 후보 페이지를 수집해 컨텍스트에 적재한다."""
     normalized_url = ctx["normalized_url"]
+    logger.info("[%s] 페이지 수집 시작", normalized_url)
+    
     homepage = evaluator.fetcher.fetch(normalized_url)
+    if not homepage.ok:
+        logger.warning("[%s] 홈페이지 수집 실패: %s", normalized_url, homepage.error)
+    else:
+        logger.info("[%s] 홈페이지 수집 성공 (fetched_by=%s)", normalized_url, homepage.fetched_by)
+
     candidate_urls = evaluator._collect_candidate_urls(normalized_url, homepage)
+    if candidate_urls:
+        logger.info("[%s] 후보 페이지 %d개 발견, 수집 시작", normalized_url, len(candidate_urls))
+    
     candidate_workers = evaluator.config.candidate_fetch_workers
     if (
         evaluator.config.auto_tune_nested_parallel
@@ -60,8 +73,6 @@ def step_fetch_and_collect_pages(evaluator: Any, ctx: PipelineContext) -> None:
         and evaluator.config.url_evaluation_workers > 1
     ):
         tuned_workers = max(1, candidate_workers // evaluator.config.url_evaluation_workers)
-        # 기본값(4/3)에서 워커가 1로 고정되는 병목을 줄이기 위해,
-        # 후보 URL이 여러 개인 경우 최소 2 워커를 보장한다.
         if tuned_workers == 1 and candidate_workers > 1 and len(candidate_urls) > 1:
             tuned_workers = 2
         candidate_workers = tuned_workers
@@ -85,10 +96,13 @@ def step_fetch_and_collect_pages(evaluator: Any, ctx: PipelineContext) -> None:
 
     ctx["homepage"] = homepage
     ctx["all_pages"] = all_pages
+    logger.info("[%s] 페이지 수집 완료 (총 %d개 페이지)", normalized_url, len(all_pages))
 
 
 def step_extract_signals(evaluator: Any, ctx: PipelineContext) -> None:
     """수집된 페이지들에서 구조화 신호(extracted)를 추출한다."""
+    normalized_url = ctx["normalized_url"]
+    logger.info("[%s] 구조화 신호 추출 중...", normalized_url)
     homepage = ctx["homepage"]
     all_pages = ctx["all_pages"]
     extracted = evaluator._extract_structured_signals(homepage, list(all_pages.values()))
@@ -98,26 +112,40 @@ def step_extract_signals(evaluator: Any, ctx: PipelineContext) -> None:
 
 def step_classify_taxonomy(evaluator: Any, ctx: PipelineContext) -> None:
     """추출 결과에 taxonomy 분류 결과를 추가한다."""
+    normalized_url = ctx["normalized_url"]
     homepage = ctx["homepage"]
     all_pages = ctx["all_pages"]
     extracted = ctx["extracted"]
     shared_text_cache = ctx.get("shared_text_cache")
+    
+    logger.info("[%s] Taxonomy 분류 시작", normalized_url)
     taxonomy = evaluator._classify_taxonomy(homepage, all_pages, extracted, text_cache=shared_text_cache)
     extracted["taxonomy"] = taxonomy
+    
+    if not taxonomy.get("taxonomy_skipped"):
+        logger.info("[%s] Taxonomy 분류 완료: %s (conf=%.2f)", 
+                    normalized_url, taxonomy.get("primary_category"), taxonomy.get("primary_confidence", 0))
 
 
 def step_assess_ai_scope(evaluator: Any, ctx: PipelineContext) -> None:
     """평가 대상이 AI 사이트인지 스코프 게이트를 판정한다."""
+    normalized_url = ctx["normalized_url"]
     homepage = ctx["homepage"]
     all_pages = ctx["all_pages"]
     extracted = ctx["extracted"]
     shared_text_cache = ctx.get("shared_text_cache")
+    
+    logger.info("[%s] AI Scope 판정 중...", normalized_url)
     ai_scope = evaluator._classify_ai_scope(homepage, all_pages, text_cache=shared_text_cache)
     extracted["ai_scope"] = ai_scope
+    logger.info("[%s] AI Scope 판정 완료: %s (conf=%.2f)", 
+                normalized_url, ai_scope.get("scope_decision"), ai_scope.get("confidence", 0))
 
 
 def step_evaluate_criteria(evaluator: Any, ctx: PipelineContext) -> None:
     """품질 기준 평가 결과와 통과 집계를 계산한다."""
+    normalized_url = ctx["normalized_url"]
+    logger.info("[%s] 품질 지표(Criteria) 평가 시작", normalized_url)
     homepage = ctx["homepage"]
     all_pages = ctx["all_pages"]
     extracted = ctx["extracted"]
@@ -128,10 +156,12 @@ def step_evaluate_criteria(evaluator: Any, ctx: PipelineContext) -> None:
     ctx["criteria"] = criteria
     ctx["passed_count"] = passed_count
     ctx["hard_pass"] = hard_pass
+    logger.info("[%s] 품질 평가 완료: %d/5 통과 (hard_pass=%s)", normalized_url, passed_count, hard_pass)
 
 
 def step_score_and_predict_status(evaluator: Any, ctx: PipelineContext) -> None:
     """점수 컨텍스트를 만들고 상태를 1차 예측한다."""
+    normalized_url = ctx["normalized_url"]
     homepage = ctx["homepage"]
     extracted = ctx["extracted"]
     criteria = ctx["criteria"]
@@ -140,16 +170,20 @@ def step_score_and_predict_status(evaluator: Any, ctx: PipelineContext) -> None:
 
     score_context = evaluator._build_score_context(criteria)
     predicted_status = evaluator._predict_status(criteria, passed_count, hard_pass, score_context)
+    total_score = float(score_context.get("total_score", 0.0))
 
     if bool(extracted.get("anti_bot_blocked")) and not homepage.ok and passed_count == 0 and predicted_status == "rejected":
         predicted_status = "incubating"
+        logger.info("[%s] Anti-bot 차단 감지되어 rejected -> incubating 완충 적용", normalized_url)
 
     ctx["score_context"] = score_context
     ctx["predicted_status"] = predicted_status
+    logger.info("[%s] 상태 예측: %s (Score: %.1f)", normalized_url, predicted_status, total_score)
 
 
 def step_review_and_finalize_status(evaluator: Any, ctx: PipelineContext) -> None:
     """리뷰 게이트를 적용해 최종 상태와 검수 사유를 확정한다."""
+    normalized_url = ctx["normalized_url"]
     homepage = ctx["homepage"]
     extracted = ctx["extracted"]
     criteria = ctx["criteria"]
@@ -162,10 +196,12 @@ def step_review_and_finalize_status(evaluator: Any, ctx: PipelineContext) -> Non
         final_status = "incubating"
         if "curated 후보였지만 수동 검수 전 보류" not in review_reasons:
             review_reasons.append("curated 후보였지만 수동 검수 전 보류")
+        logger.info("[%s] Curated 후보이나 리뷰 필요 사유로 인해 incubating으로 조정", normalized_url)
 
     ctx["review_required"] = review_required
     ctx["review_reasons"] = review_reasons
     ctx["final_status"] = final_status
+    logger.info("[%s] 최종 상태 확정: %s (Review Required: %s)", normalized_url, final_status, review_required)
 
 
 def step_build_summary(evaluator: Any, ctx: PipelineContext) -> None:
@@ -603,6 +639,113 @@ def _annotate_results_with_management(
         registry_tools[tool_id] = updated_record
 
 
+def _favicon_url(canonical_url: str) -> str:
+    """canonical URL에서 favicon URL을 조합한다."""
+    parsed = urlparse(canonical_url)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}/favicon.ico"
+    return ""
+
+
+def _result_to_ai_tools_entry(result: EvaluationResult) -> Optional[Dict[str, str]]:
+    """평가 결과를 ai-tools.json 항목 형태로 변환한다."""
+    if not result.management:
+        return None
+    management = result.management
+    canonical_url = str(management.get("canonical_url", "")).strip()
+    if not canonical_url:
+        return None
+
+    extracted = result.extracted if isinstance(result.extracted, dict) else {}
+    taxonomy = extracted.get("taxonomy", {}) if isinstance(extracted.get("taxonomy"), dict) else {}
+
+    name = str(management.get("display_name", "")).strip()
+    desc = str(taxonomy.get("one_line_summary", "")).strip() if not taxonomy.get("taxonomy_skipped") else ""
+    img = _favicon_url(canonical_url)
+    link = canonical_url
+    category = str(taxonomy.get("primary_category", "")).strip() if not taxonomy.get("taxonomy_skipped") else ""
+
+    return {"name": name, "desc": desc, "img": img, "link": link, "category": category}
+
+
+def _load_ai_tools_json(path: str) -> List[Dict[str, str]]:
+    """ai-tools.json 파일을 읽어 목록으로 반환한다."""
+    resolved = os.path.abspath(path)
+    if not os.path.isfile(resolved):
+        return []
+    try:
+        with open(resolved, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+    except Exception:
+        pass
+    return []
+
+
+def _write_ai_tools_json(items: List[Dict[str, str]], path: str) -> str:
+    """ai-tools.json 파일을 저장하고 실제 저장 경로를 반환한다."""
+    resolved = os.path.abspath(path)
+    parent = os.path.dirname(resolved)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(resolved, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    return resolved
+
+
+def _derive_output_ai_tools_path(source_path: str, checked_at: str) -> str:
+    """원본 ai-tools.json 경로에 타임스탬프를 붙여 새 출력 경로를 생성한다."""
+    resolved = os.path.abspath(source_path)
+    directory = os.path.dirname(resolved)
+    name, ext = os.path.splitext(os.path.basename(resolved))
+    timestamp = checked_at.replace("-", "").replace("T", "_").replace(":", "").replace("Z", "")[:15]
+    return os.path.join(directory, f"{name}_{timestamp}{ext}")
+
+
+def _update_ai_tools_json(
+    results: List[EvaluationResult],
+    ai_tools_path: str,
+    checked_at: str,
+    include_statuses: Optional[List[str]] = None,
+) -> Optional[str]:
+    """평가 결과를 ai-tools.json 기반의 새 파일에 추가하거나 기존 항목을 업데이트한다."""
+    if not ai_tools_path:
+        return None
+
+    statuses = set(include_statuses or ["curated", "incubating"])
+    existing = _load_ai_tools_json(ai_tools_path)
+
+    link_index: Dict[str, int] = {}
+    for i, item in enumerate(existing):
+        normalized = _normalize_optional_url(str(item.get("link", "")).strip())
+        if normalized:
+            link_index[normalized] = i
+
+    added = 0
+    updated = 0
+    for result in results:
+        if result.final_status not in statuses:
+            continue
+        entry = _result_to_ai_tools_entry(result)
+        if not entry or not entry.get("link"):
+            continue
+        normalized_link = _normalize_optional_url(entry["link"])
+        if normalized_link in link_index:
+            existing[link_index[normalized_link]] = entry
+            updated += 1
+        else:
+            link_index[normalized_link] = len(existing)
+            existing.append(entry)
+            added += 1
+
+    output_path = _derive_output_ai_tools_path(ai_tools_path, checked_at)
+    saved = _write_ai_tools_json(existing, output_path)
+    print(f"ai-tools.json 저장 완료: {saved} (추가 {added}건, 수정 {updated}건, 원본 유지: {os.path.abspath(ai_tools_path)})")
+    return saved
+
+
 def _read_urls_from_file(file_path: str) -> List[str]:
     """텍스트 파일에서 URL 목록(줄 단위)을 읽는다."""
     urls: List[str] = []
@@ -615,12 +758,30 @@ def _read_urls_from_file(file_path: str) -> List[str]:
     return urls
 
 
-def _parse_cli_args(args: List[str]) -> tuple[List[str], str, str, str]:
-    """CLI 인자에서 URL 목록/결과 파일/레지스트리 파일/source를 파싱한다."""
+def _read_urls_from_json(file_path: str) -> List[str]:
+    """ai-tools.json 형식 파일의 link 필드에서 URL 목록을 읽는다."""
+    urls: List[str] = []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    link = str(item.get("link", "")).strip()
+                    if link:
+                        urls.append(link)
+    except Exception as e:
+        print(f"JSON 파일 읽기 실패 ({file_path}): {e}")
+    return urls
+
+
+def _parse_cli_args(args: List[str]) -> tuple[List[str], str, str, str, str]:
+    """CLI 인자에서 URL 목록/결과 파일/레지스트리 파일/source/ai-tools 파일을 파싱한다."""
     collected: List[str] = []
     output_json_path = _default_output_json_path()
     registry_json_path = _default_registry_json_path()
     source = "manual_cli"
+    ai_tools_json_path = ""
     i = 0
     while i < len(args):
         arg = args[i].strip()
@@ -653,16 +814,35 @@ def _parse_cli_args(args: List[str]) -> tuple[List[str], str, str, str]:
             i += 2
             continue
 
+        if arg == "--ai-tools-json":
+            if i + 1 >= len(args):
+                raise ValueError("--ai-tools-json 옵션 뒤에 파일 경로가 필요합니다.")
+            ai_tools_json_path = args[i + 1].strip()
+            i += 2
+            continue
+
         if arg in ("-f", "--url-file"):
             if i + 1 >= len(args):
                 raise ValueError("--url-file 옵션 뒤에 파일 경로가 필요합니다.")
             file_path = args[i + 1].strip()
-            collected.extend(_read_urls_from_file(file_path))
+            if file_path.lower().endswith(".json"):
+                collected.extend(_read_urls_from_json(file_path))
+                if not ai_tools_json_path:
+                    ai_tools_json_path = file_path
+            else:
+                collected.extend(_read_urls_from_file(file_path))
             i += 2
             continue
 
         if arg.lower().endswith(".txt") and os.path.isfile(arg):
             collected.extend(_read_urls_from_file(arg))
+            i += 1
+            continue
+
+        if arg.lower().endswith(".json") and os.path.isfile(arg):
+            collected.extend(_read_urls_from_json(arg))
+            if not ai_tools_json_path:
+                ai_tools_json_path = arg
             i += 1
             continue
 
@@ -676,7 +856,7 @@ def _parse_cli_args(args: List[str]) -> tuple[List[str], str, str, str]:
             continue
         seen.add(url)
         deduped.append(url)
-    return deduped, output_json_path, registry_json_path, source
+    return deduped, output_json_path, registry_json_path, source, ai_tools_json_path
 
 
 def run_quality_pipeline(
@@ -713,7 +893,9 @@ def run_quality_pipeline(
 
         def evaluate_one(index: int, url: str) -> tuple[int, EvaluationResult]:
             evaluator = get_worker_evaluator()
+            logger.info("[%d/%d] 평가 시작: %s", index + 1, len(urls), url)
             result = evaluator.evaluate(url)
+            logger.info("[%d/%d] 평가 완료: %s → %s", index + 1, len(urls), url, result.final_status)
             should_sleep = (
                 evaluator.config.inter_url_delay_sec > 0
                 and not evaluator.config.skip_inter_url_delay_in_parallel
@@ -773,13 +955,14 @@ def main() -> None:
         print("  python run.py data/site_url_list.txt")
         print("  python run.py --output-json result/results.json https://chatgpt.com")
         print("  python run.py --source ai-tools.json --registry-json result/tool_registry.json --url-file data/site_url_list.txt")
+        print("  python run.py --ai-tools-json ../../ai-tools.json --url-file data/site_url_list.txt")
         print("주의: 쿼리스트링 URL은 반드시 따옴표로 감싸세요. (&가 셸에서 백그라운드 기호로 해석됩니다)")
         print("기본 출력 파일은 ai_url_classifier/result 폴더에 results_YYYYMMDD_HHMMSS.json 형식으로 저장됩니다.")
         print("기본 레지스트리 파일은 ai_url_classifier/result/tool_registry.json 입니다.")
         sys.exit(1)
 
     try:
-        urls, output_json_path, registry_json_path, source = _parse_cli_args(sys.argv[1:])
+        urls, output_json_path, registry_json_path, source, ai_tools_json_path = _parse_cli_args(sys.argv[1:])
     except Exception as e:
         print(f"입력 인자 처리 실패: {e}")
         sys.exit(1)
@@ -803,6 +986,8 @@ def main() -> None:
     if registry_json_path:
         registry_saved_path = _write_tool_registry(registry_tools, registry_json_path, checked_at)
         print(f"툴 레지스트리 저장 완료: {registry_saved_path}")
+    if ai_tools_json_path:
+        _update_ai_tools_json(results, ai_tools_json_path, checked_at)
 
 
 if __name__ == "__main__":

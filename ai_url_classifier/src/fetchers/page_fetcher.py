@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 import re
+import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
@@ -18,6 +19,8 @@ from urllib3.util.retry import Retry
 from config import EvalConfig
 from models import FetchResult
 from utils import lower, normalize_url, squash_ws
+
+logger = logging.getLogger(__name__)
 
 try:
     from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
@@ -49,13 +52,26 @@ class PageFetcher:
         """URL을 수집하고 requests/playwright 중 더 나은 결과를 반환한다."""
         normalized = normalize_url(url)
         req_result = self._fetch_with_requests(normalized)
+        
         if not self.playwright_enabled:
             return req_result
+            
         if self._needs_playwright(req_result, lightweight=lightweight):
+            mode = "lightweight" if lightweight else "standard"
+            logger.info("[%s] Playwright 수집 전환 (%s mode)", normalized, mode)
             pw_result = self._fetch_with_playwright(normalized, lightweight=lightweight)
+            
             if self._is_playwright_unavailable_error(pw_result.error):
+                logger.error("[%s] Playwright 실행 불가로 requests 결과 사용", normalized)
                 return req_result
-            return self._choose_better_result(req_result, pw_result)
+                
+            better = self._choose_better_result(req_result, pw_result)
+            if better is pw_result:
+                logger.info("[%s] Playwright 결과 선택 (richness 점수 우세)", normalized)
+            else:
+                logger.info("[%s] Requests 결과 유지 (Playwright 결과 빈약)", normalized)
+            return better
+            
         return req_result
 
     def fetch_many(self, urls: List[str], max_workers: int = 4, lightweight: bool = False) -> dict[str, FetchResult]:
@@ -73,6 +89,7 @@ class PageFetcher:
                 try:
                     results[url] = future.result()
                 except Exception as e:
+                    logger.error("[%s] fetch_many 도중 예외 발생: %s", url, e)
                     normalized = normalize_url(url)
                     results[url] = FetchResult(
                         url=normalized,

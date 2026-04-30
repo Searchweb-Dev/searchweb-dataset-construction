@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+import logging
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from config import EvalConfig
@@ -17,6 +18,7 @@ from classifiers.status_policy import StatusPolicyMixin
 from classifiers.taxonomy_classifier import TaxonomyClassifierMixin
 from utils import has_usable_url_hint, is_same_domain, keyword_hit, lower, snippet, split_sentences
 
+logger = logging.getLogger(__name__)
 
 PipelineStep = Callable[[Any, Dict[str, object]], None]
 
@@ -39,12 +41,30 @@ class CriteriaEvaluatorMixin:
         taxonomy = extracted.get("taxonomy", {})
         if (not ai_scope) and taxonomy and not bool(taxonomy.get("is_ai_site", True)):
             return self._build_non_ai_scope_criteria(homepage, str(taxonomy.get("ai_site_reason", "")))
+        
+        domain = (re.sub(r"^https?://", "", homepage.final_url or homepage.url)).split("/")[0]
+        
+        usable_now = self._eval_usable_now(homepage, all_pages, extracted)
+        logger.info("[%s] Criteria(usable_now): passed=%s (conf=%.2f)", domain, usable_now.passed, usable_now.confidence)
+        
+        clear_desc = self._eval_clear_function_desc(homepage, all_pages, extracted)
+        logger.info("[%s] Criteria(clear_desc): passed=%s (conf=%.2f)", domain, clear_desc.passed, clear_desc.confidence)
+        
+        pricing = self._eval_pricing(homepage, all_pages, extracted)
+        logger.info("[%s] Criteria(pricing): passed=%s", domain, pricing.passed)
+        
+        docs = self._eval_docs(homepage, all_pages, extracted)
+        logger.info("[%s] Criteria(docs): passed=%s", domain, docs.passed)
+        
+        policy = self._eval_policy(homepage, all_pages, extracted)
+        logger.info("[%s] Criteria(policy): passed=%s", domain, policy.passed)
+
         return {
-            "usable_now": self._eval_usable_now(homepage, all_pages, extracted),
-            "clear_function_desc": self._eval_clear_function_desc(homepage, all_pages, extracted),
-            "has_pricing": self._eval_pricing(homepage, all_pages, extracted),
-            "has_docs_or_help": self._eval_docs(homepage, all_pages, extracted),
-            "has_privacy_or_data_policy": self._eval_policy(homepage, all_pages, extracted),
+            "usable_now": usable_now,
+            "clear_function_desc": clear_desc,
+            "has_pricing": pricing,
+            "has_docs_or_help": docs,
+            "has_privacy_or_data_policy": policy,
         }
 
     def _build_non_ai_scope_criteria(self, homepage: FetchResult, detail_reason: str) -> Dict[str, CriterionResult]:

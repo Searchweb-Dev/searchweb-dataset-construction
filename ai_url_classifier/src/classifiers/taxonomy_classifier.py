@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+import logging
 from typing import Dict, List, Optional
 
 from keywords import (
@@ -17,6 +18,8 @@ from keywords import (
 )
 from models import FetchResult
 from utils import keyword_hit, keyword_hit_count, lower, snippet, split_sentences
+
+logger = logging.getLogger(__name__)
 
 
 class TaxonomyClassifierMixin:
@@ -71,17 +74,24 @@ class TaxonomyClassifierMixin:
             header_hits = keyword_hit_count(header_blob, keywords, normalized=True)
             link_hits = keyword_hit_count(links_blob, keywords, normalized=True)
             category_scores[category] = body_hits + (1.5 * header_hits) + (0.7 * link_hits)
+        
         ranked_categories = sorted(category_scores.items(), key=lambda x: x[1], reverse=True)
         top_category, top_score = ranked_categories[0] if ranked_categories else ("Uncategorized", 0.0)
         second_score = ranked_categories[1][1] if len(ranked_categories) > 1 else 0.0
 
+        domain = (re.sub(r"^https?://", "", homepage.final_url or homepage.url)).split("/")[0]
+        logger.debug("[%s] Taxonomy 점수 상세: %s", domain, ranked_categories[:3])
+
         if top_score < 1.0:
             primary_category = "Uncategorized"
             primary_confidence = 0.0
+            logger.info("[%s] Taxonomy 분류 실패: 매칭 점수 부족(top_score=%.1f)", domain, top_score)
         else:
             primary_category = top_category
             margin = max(0.0, top_score - second_score)
             primary_confidence = min(0.99, 0.42 + min(top_score, 8.0) * 0.06 + min(margin, 5.0) * 0.05)
+            logger.info("[%s] Taxonomy 분류 성공: %s (score=%.1f, conf=%.2f)", 
+                        domain, primary_category, top_score, primary_confidence)
 
         subtask_scores: Dict[str, int] = {}
         for subtask, keywords in SUBTASK_KEYWORDS_BY_PRIMARY.get(primary_category, {}).items():
@@ -112,6 +122,7 @@ class TaxonomyClassifierMixin:
         has_api = keyword_hit(combined_blob, PLATFORM_KEYWORDS["api"]) or any("/api" in p.final_url.lower() for p in usable_pages)
         platforms = self._infer_platforms(combined_blob, has_api, usable_pages)
         pricing_model = self._infer_pricing_model(combined_blob, extracted)
+        
         return {
             "primary_category": primary_category,
             "primary_confidence": round(primary_confidence, 3),
