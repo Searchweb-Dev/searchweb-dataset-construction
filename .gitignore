@@ -221,3 +221,15 @@ __marimo__/
 !ai_url_classifier/result/
 ai_url_classifier/result/*
 !ai_url_classifier/result/.gitkeep
+
+.worktrees/
+node_modules/
+result/
+tests/
+output/
+
+# Claude Code
+.claude/
+CLAUDE.md
+.claudeignore
+harness/
