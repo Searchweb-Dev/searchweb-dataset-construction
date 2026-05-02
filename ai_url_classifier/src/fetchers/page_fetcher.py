@@ -153,13 +153,15 @@ class PageFetcher:
         """requests 기반 정적 수집을 수행한다."""
         try:
             resp = self._get_session().get(url, timeout=self.config.timeout_sec, allow_redirects=True)
+            ok = 200 <= resp.status_code < 400
+            error = None if ok else f"http_error: {resp.status_code}"
             return self._build_fetch_result(
                 requested_url=url,
                 final_url=resp.url,
                 status_code=resp.status_code,
                 html=resp.text or "",
-                ok=200 <= resp.status_code < 400,
-                error=None,
+                ok=ok,
+                error=error,
                 fetched_by="requests",
             )
         except Exception as e:

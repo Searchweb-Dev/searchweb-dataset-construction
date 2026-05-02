@@ -63,7 +63,7 @@ class EvalConfig:
     rule_version: str = "ai-url-classifier-rules-v1"     # 결과/이력에 기록할 규칙 버전 문자열
 
     use_playwright: bool = True                          # Playwright 사용 여부
-    playwright_headless: bool = False                    # 브라우저 headless 실행 여부
+    playwright_headless: bool = True                     # 브라우저 headless 실행 여부
     playwright_timeout_ms: int = 15000                   # Playwright 타임아웃(ms)
     playwright_wait_until: str = "domcontentloaded"      # page.goto wait_until 옵션
     playwright_extra_wait_ms: int = 1200                 # page.goto 이후 추가 대기(ms)
