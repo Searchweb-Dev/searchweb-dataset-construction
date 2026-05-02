@@ -225,7 +225,6 @@ ai_url_classifier/result/*
 .worktrees/
 node_modules/
 result/
-tests/
 output/
 
 # Claude Code
@@ -235,3 +234,4 @@ CLAUDE.md
 harness/
 
 .serena
+ai_url_classifier/
