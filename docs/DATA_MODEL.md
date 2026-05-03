@@ -1,348 +1,296 @@
-# Data Model
+# SearchWeb 데이터 모델 (v0.3.0)
 
-PostgreSQL 데이터베이스 스키마 정의입니다.
-
----
-
-## Overview
-
-3개의 주요 테이블로 구성:
-
-1. **AnalysisJob** — 분석 작업 추적
-2. **AISite** — 분석된 AI 사이트
-3. **UserBookmark** — 사용자 북마크/폴더
+북마크/링크/폴더 관리 서비스를 위한 전체 데이터 정의 문서.
 
 ---
 
-## 1. AnalysisJob
+## 핵심 도메인 구조
 
-분석 작업의 상태를 추적합니다.
+| 도메인 | 설명 | 테이블 수 | 테이블명 |
+|--------|------|----------|---------|
+| **base** | 모든 엔티티 공통 컬럼 | 1 | `base_entity` |
+| **auth** | 사용자 인증 | 2 | `member`, `oauth_member` |
+| **taxonomy** | 카테고리 분류 | 1 | `category_master` |
+| **member** | 개인 폴더/저장/태그 | 5 | `member_folder`, `member_saved_link`, `member_tag`, `member_saved_link_tag`, `member_folder_tag` |
+| **link** | 링크 메타데이터 | 1 | `link` |
+| **enrichment** | 자동 채우기/추천/피드백 | 4 | `folder_suggestion_rule`, `link_enrichment`, `link_enrichment_keyword`, `link_enrichment_feedback` |
+| **team** | 팀 협업(v0.4.0) | 7 | `team`, `team_member`, `team_folder`, `team_folder_permission`, `team_saved_link`, `team_tag`, `team_saved_link_tag` |
 
-### Schema
-
-```python
-class AnalysisJob(Base):
-    __tablename__ = "analysis_jobs"
-    
-    job_id = Column(String, primary_key=True)
-    url = Column(String, nullable=False)
-    status = Column(String)  # queued, processing, completed, failed
-    site_id = Column(Integer, ForeignKey("ai_sites.id"), nullable=True)
-    error = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    completed_at = Column(DateTime, nullable=True)
-```
-
-### Fields
-
-| 필드 | 타입 | 설명 | 인덱스 |
-|------|------|------|--------|
-| `job_id` | String (UUID) | 작업 고유 ID (PK) | ✅ |
-| `url` | String | 분석 대상 URL | - |
-| `status` | String | 작업 상태 (queued/processing/completed/failed) | ✅ |
-| `site_id` | Integer (FK) | 분석 결과 저장된 AISite ID (완료 후 저장) | ✅ |
-| `error` | String | 실패 사유 (failed 상태일 때만 저장) | - |
-| `created_at` | DateTime | 작업 생성 시간 | ✅ |
-| `completed_at` | DateTime | 작업 완료 시간 (완료 후 저장) | - |
-
-### Lifecycle
-
-```
-1. 작업 요청 → AnalysisJob 생성 (status: queued)
-2. Celery 처리 → status: processing
-3. 분석 완료 → AISite 저장 + site_id 설정
-4. 상태 업데이트 → status: completed (또는 failed)
-```
+**현재 v0.3.0: 14개 테이블 (개인 도메인 완성)**
 
 ---
 
-## 2. AISite
+## 테이블 정의
 
-분석된 AI 사이트 정보를 저장합니다.
+### base_entity (공통 템플릿/믹스인)
 
-### Schema
+실제 DB 물리 테이블이 아닌 모든 엔티티에 공통으로 적용되는 "컬럼 규약/템플릿".
 
-```python
-class AISite(Base):
-    __tablename__ = "ai_sites"
-    
-    id = Column(Integer, primary_key=True)
-    url = Column(String, unique=True, index=True)
-    title = Column(String)
-    
-    # 계층적 카테고리
-    category_level_1 = Column(String, index=True)
-    category_level_2 = Column(String, index=True)
-    category_level_3 = Column(String, nullable=True)
-    
-    # 추가 특성
-    tags = Column(JSON, index=True)
-    
-    # 분석 결과
-    is_ai_tool = Column(Boolean, default=True)
-    scores = Column(JSON)
-    summary = Column(String)
-    screenshot_url = Column(String)
-    
-    # 타임스탬프
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # 편의 메서드
-    @property
-    def full_category_path(self) -> str:
-        """전체 카테고리 경로 반환"""
-        parts = [self.category_level_1, self.category_level_2]
-        if self.category_level_3:
-            parts.append(self.category_level_3)
-        return " > ".join(parts)
-```
-
-### Fields
-
-| 필드 | 타입 | 설명 | 인덱스 |
-|------|------|------|--------|
-| `id` | Integer | 사이트 고유 ID (PK) | ✅ |
-| `url` | String | 사이트 URL (UNIQUE) | ✅ |
-| `title` | String | 사이트 제목 | - |
-| `category_level_1` | String | 모달리티 (text/image/video/audio/code/multimodal/data/business) | ✅ |
-| `category_level_2` | String | 작업 유형 (text-generation/image-generation/etc) | ✅ |
-| `category_level_3` | String | 세부 기능 (선택) | - |
-| `tags` | JSON | 추가 특성 (배열) | ✅ |
-| `is_ai_tool` | Boolean | AI 도구 여부 | - |
-| `scores` | JSON | 평가 점수 {utility, trust, originality} | - |
-| `summary` | String | 한 문장 요약 | - |
-| `screenshot_url` | String | 스크린샷 URL | - |
-| `created_at` | DateTime | 분석 시간 | ✅ |
-| `updated_at` | DateTime | 마지막 수정 시간 | - |
-
-### Category Fields
-
-**level_1 예시:**
-```
-text, image, video, audio, code, multimodal, data, business
-```
-
-**level_2 예시 (level_1=text):**
-```
-text-generation, text-analysis, conversational, search-retrieval
-```
-
-**level_3 예시 (level_1=text, level_2=text-generation):**
-```
-content-creation, copywriting, email-generation, creative-writing
-```
-
-자세한 분류는 [CATEGORY_TAXONOMY.md](./CATEGORY_TAXONOMY.md) 참조
-
-### Tags Examples
-
-```json
-[
-  "multilingual",
-  "api-available", 
-  "free-tier",
-  "open-source",
-  "webhook",
-  "fine-tuning",
-  "real-time",
-  "high-quality"
-]
-```
-
-### Scores JSON Structure
-
-```json
-{
-  "utility": 8.4,
-  "trust": 7.9,
-  "originality": 6.8
-}
-```
-
-각 점수는 1~10 범위
-
-### Example Row
-
-```json
-{
-  "id": 1,
-  "url": "https://midjourney.com",
-  "title": "Midjourney",
-  "category_level_1": "image",
-  "category_level_2": "image-generation",
-  "category_level_3": "text-to-image",
-  "tags": ["api-available", "paid", "discord-integration", "high-quality"],
-  "is_ai_tool": true,
-  "scores": {
-    "utility": 9.2,
-    "trust": 8.8,
-    "originality": 8.1
-  },
-  "summary": "텍스트 프롬프트로 고품질 이미지를 생성하는 AI 서비스",
-  "screenshot_url": "https://...",
-  "created_at": "2024-01-15T10:30:00Z",
-  "updated_at": "2024-01-15T10:30:00Z"
-}
-```
+| 컬럼명 | 타입 | NULL | 기본값 | 설명 |
+|--------|------|------|--------|------|
+| `created_at` | timestamptz | not null | now() | 생성 시각 |
+| `updated_at` | timestamptz | not null | now() | 마지막 수정 시각(UPDATE 시 갱신) |
+| `deleted_at` | timestamptz | - | - | 소프트 삭제 시각(NULL이면 미삭제) |
+| `created_by_member_id` | bigint | - | - | 생성자 사용자 ID(논리 참조) |
+| `updated_by_member_id` | bigint | - | - | 수정자 사용자 ID(논리 참조) |
+| `deleted_by_member_id` | bigint | - | - | 삭제자 사용자 ID(논리 참조) |
 
 ---
 
-## 3. UserBookmark
+### member (auth 스키마)
 
-사용자가 AI 사이트를 폴더/북마크로 구성합니다.
+서비스 사용자 계정 기본 정보. 팀/폴더/링크 저장 등 대부분 기능에서 참조되는 최상위 엔티티.
 
-### Schema
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `member_id` | bigint | not null | identity | PK | - |
+| `email` | varchar(255) | not null | - | uq_member_email | - |
+| `login_id` | varchar(50) | - | - | uq_member_login_id | - |
+| `password_hash` | varchar(255) | - | - | - | - |
+| `member_name` | varchar(20) | not null | - | - | - |
+| `job` | varchar(20) | - | - | - | - |
+| `major` | varchar(20) | - | - | - | - |
+| `status` | varchar(20) | not null | 'active' | - | idx_member_status |
+| + base_entity | | | | | |
 
-```python
-class UserBookmark(Base):
-    __tablename__ = "user_bookmarks"
-    
-    id = Column(Integer, primary_key=True)
-    user_id = Column(String, index=True)
-    site_id = Column(Integer, ForeignKey("ai_sites.id"))
-    folder_name = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
-```
-
-### Fields
-
-| 필드 | 타입 | 설명 | 인덱스 |
-|------|------|------|--------|
-| `id` | Integer | 북마크 고유 ID (PK) | ✅ |
-| `user_id` | String | 사용자 ID | ✅ |
-| `site_id` | Integer (FK) | AISite ID | ✅ |
-| `folder_name` | String | 폴더명 (예: "이미지 생성", "음성 변환") | - |
-| `created_at` | DateTime | 북마크 추가 시간 | - |
-
-### Example Usage
-
-```python
-# 사용자가 이미지 생성 도구들을 "이미지 생성" 폴더에 저장
-user_id = "user_123"
-for site_id in [1, 2, 3]:  # Midjourney, DALL-E, Stable Diffusion
-    bookmark = UserBookmark(
-        user_id=user_id,
-        site_id=site_id,
-        folder_name="이미지 생성"
-    )
-    db.add(bookmark)
-```
+**제약조건:**
+- `ck_member_login_pw_pair`: (login_id IS NULL AND password_hash IS NULL) OR (login_id IS NOT NULL AND password_hash IS NOT NULL)
+- `ck_member_status`: status IN ('active','blocked')
 
 ---
 
-## Relationships
+### oauth_member (auth 스키마)
 
-```
-AnalysisJob
-  └─ site_id ──→ AISite.id
+소셜 로그인(제공자/제공자 사용자키)과 내부 사용자 계정을 매핑한다.
 
-UserBookmark
-  └─ site_id ──→ AISite.id
-  └─ user_id (외부 연동)
-```
-
----
-
-## Indexing Strategy
-
-**주요 인덱스 (검색 성능 최적화):**
-
-```sql
--- URL 중복 방지 + 빠른 조회
-CREATE UNIQUE INDEX idx_ai_site_url ON ai_sites(url);
-
--- 카테고리 필터링
-CREATE INDEX idx_ai_site_category_l1 ON ai_sites(category_level_1);
-CREATE INDEX idx_ai_site_category_l2 ON ai_sites(category_level_2);
-
--- 태그 검색
-CREATE INDEX idx_ai_site_tags ON ai_sites USING gin(tags);
-
--- 생성 시간 정렬
-CREATE INDEX idx_ai_site_created_at ON ai_sites(created_at DESC);
-
--- 작업 상태 조회
-CREATE INDEX idx_analysis_job_status ON analysis_jobs(status);
-CREATE INDEX idx_analysis_job_site_id ON analysis_jobs(site_id);
-
--- 사용자 북마크 조회
-CREATE INDEX idx_user_bookmark_user_id ON user_bookmarks(user_id);
-CREATE INDEX idx_user_bookmark_site_id ON user_bookmarks(site_id);
-```
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `oauth_member_id` | int | not null | identity | PK | - |
+| `member_id` | bigint | not null | - | - | idx_oauth_member_member_id |
+| `provider` | varchar(30) | not null | - | - | idx_oauth_member_provider |
+| `provider_member_key` | varchar(255) | not null | - | uq_oauth_member(provider, provider_member_key) | - |
+| + base_entity | | | | | |
 
 ---
 
-## Migration Notes
+### category_master (taxonomy 스키마)
 
-### Initial Setup
+링크 자동 분류에 사용하는 카테고리 마스터. 현재는 대분류만 운영하되, 확장 대비 트리 구조 지원.
 
-```python
-# SQLAlchemy ORM 사용
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `category_id` | int | not null | identity | PK | - |
+| `parent_category_id` | int | - | - | - | idx_category_parent |
+| `category_name` | varchar(80) | not null | - | uq_category_name(조건부) | idx_category_name |
+| `category_level` | smallint | not null | 1 | - | idx_category_level |
+| `is_active` | boolean | not null | true | - | idx_category_active |
+| + base_entity | | | | | |
 
-engine = create_engine("postgresql://user:pass@localhost/ai_sites")
-Base.metadata.create_all(engine)
-```
-
-### Migrations (Alembic)
-
-```bash
-alembic init alembic
-alembic revision --autogenerate -m "Create initial schema"
-alembic upgrade head
-```
+**제약조건:**
+- `ck_category_level`: category_level IN (1,2)
 
 ---
 
-## Query Examples
+### member_folder (member 스키마)
 
-### 1. URL로 빠른 조회 (중복 분석 방지)
+개인 사용자가 소유하는 폴더. parent_folder_id로 최대 2층 구조를 지원한다.
 
-```python
-site = db.query(AISite).filter_by(url="https://midjourney.com").first()
-if site:
-    return site  # 캐시 히트 - 분석 불필요
-```
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `member_folder_id` | int | not null | identity | PK | - |
+| `owner_member_id` | bigint | not null | - | - | idx_member_folder_owner |
+| `parent_folder_id` | int | - | - | - | idx_member_folder_parent |
+| `folder_name` | varchar(80) | not null | - | uq_member_folder(owner,parent,name) | idx_member_folder_name |
+| `description` | text | - | - | - | - |
+| + base_entity | | | | | |
 
-### 2. 카테고리로 필터링
-
-```python
-# 모든 이미지 생성 도구
-tools = db.query(AISite).filter(
-    AISite.category_level_1 == "image",
-    AISite.category_level_2 == "image-generation"
-).all()
-```
-
-### 3. 사용자 북마크 조회
-
-```python
-bookmarks = db.query(UserBookmark).filter_by(user_id="user_123").all()
-sites = [db.query(AISite).get(b.site_id) for b in bookmarks]
-```
-
-### 4. 최신 분석 사이트
-
-```python
-latest = db.query(AISite).order_by(AISite.created_at.desc()).limit(10).all()
-```
+**외래키:**
+- `owner_member_id` → `member.member_id`
+- `parent_folder_id` → `member_folder.member_folder_id`
 
 ---
 
-## Constraints
+### member_saved_link (member 스키마)
 
-- **URL Uniqueness**: 같은 URL은 한 번만 저장
-- **Referential Integrity**: site_id는 항상 유효한 AISite를 가리킴
-- **Not Null**: 필수 필드는 NOT NULL 제약
-- **JSON Validation**: scores, tags는 Pydantic으로 검증 후 저장
+사용자가 개인 폴더에 링크를 저장한 항목. 대표 카테고리(시스템/사용자 보정)를 포함해 필터링/정렬이 가능.
+
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `member_saved_link_id` | int | not null | identity | PK | - |
+| `link_id` | bigint | not null | - | uq_member_saved_link(folder,link) | idx_member_saved_link_link |
+| `link_enrichment_id` | int | - | - | - | idx_member_saved_link_enrichment |
+| `member_folder_id` | int | not null | - | - | idx_member_saved_link_folder |
+| `display_title` | varchar(255) | not null | - | - | idx_member_saved_link_title |
+| `note` | text | - | - | - | - |
+| `primary_category_id` | int | - | - | - | idx_member_saved_link_primary_category |
+| `category_source` | varchar(10) | not null | 'system' | - | - |
+| `category_score` | numeric(5,4) | - | - | - | - |
+| + base_entity | | | | | |
+
+**제약조건:**
+- `ck_member_saved_link_category_source`: category_source IN ('system','member')
+- `ck_member_saved_link_category_score`: category_score IS NULL OR (category_score BETWEEN 0 AND 1)
 
 ---
 
-## Performance Considerations
+### member_tag (member 스키마)
 
-- **대량 조회**: category 필터링 시 인덱스 활용
-- **태그 검색**: GIN 인덱스로 배열 검색 가속화
-- **중복 분석 방지**: URL unique 인덱스로 캐시 히트율 향상
-- **폴더 구성**: user_id 인덱스로 사용자 북마크 빠른 조회
+사용자가 직접 만드는 개인 태그(단어) 마스터. 개인 저장 항목에 부착하여 검색/필터에 사용.
+
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `member_tag_id` | bigint | not null | identity | PK | - |
+| `owner_member_id` | bigint | not null | - | uq_member_tag(owner,name) | idx_member_tag_owner |
+| `tag_name` | varchar(50) | not null | - | - | - |
+| + base_entity | | | | | |
+
+---
+
+### member_saved_link_tag (member 스키마 - 매핑 테이블)
+
+저장 항목(개인)에 개인 태그(member_tag)를 부착한다. 검색/필터에 사용.
+
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `member_saved_link_tag_id` | bigint | not null | identity | PK | - |
+| `member_saved_link_id` | bigint | not null | - | uq_member_saved_link_tag(link,tag) | idx_member_saved_link_tag_item |
+| `member_tag_id` | bigint | not null | - | - | idx_member_saved_link_tag_tag |
+| `created_at` | timestamptz | not null | now() | - | - |
+
+---
+
+### member_folder_tag (member 스키마 - 매핑 테이블)
+
+개인 폴더에 개인 태그(member_tag)를 부착한다.
+
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `member_folder_tag_id` | bigint | not null | identity | PK | - |
+| `member_folder_id` | int | not null | - | uq_member_folder_tag(folder,tag) | idx_member_folder_tag_item |
+| `member_tag_id` | bigint | not null | - | - | idx_member_folder_tag_tag |
+| `created_at` | timestamptz | not null | now() | - | - |
+
+---
+
+### link (link 스키마)
+
+URL 대상(정규화 URL, 메타 정보, 자동분류 대표 카테고리/점수/버전/시각)을 저장한다. 동일 URL은 1건으로 재사용.
+
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `link_id` | bigint | not null | identity | PK | - |
+| `canonical_url` | text | not null | - | uq_link_canonical | - |
+| `original_url` | text | not null | - | - | - |
+| `domain` | varchar(255) | - | - | - | idx_link_domain |
+| `title` | varchar(255) | - | - | - | idx_link_title |
+| `description` | text | - | - | - | - |
+| `thumbnail_url` | text | - | - | - | - |
+| `favicon_url` | text | - | - | - | - |
+| `content_type` | varchar(30) | not null | 'link' | - | idx_link_content_type |
+| `primary_category_id` | int | not null | - | - | idx_link_primary_category |
+| `category_score` | numeric(5,4) | - | - | - | - |
+| `classifier_version` | varchar(50) | - | - | - | - |
+| `categorized_at` | timestamptz | - | - | - | idx_link_categorized_at |
+| + base_entity | | | | | |
+
+**제약조건:**
+- `ck_link_content_type`: content_type IN ('link','article','video','pdf','etc')
+
+---
+
+### folder_suggestion_rule (enrichment 스키마)
+
+자동분류된 카테고리를 기반으로 저장 폴더를 자동 추천하기 위한 규칙. 개인/팀 스코프에 따라 규칙 분리, 자동 채우기 시 우선순위가 높은 규칙부터 적용.
+
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `folder_suggestion_rule_id` | int | not null | identity | PK | - |
+| `scope_type` | varchar(10) | not null | 'member' | - | idx_fsr_scope |
+| `owner_member_id` | bigint | - | - | uq_fsr(조건부) | idx_fsr_owner |
+| `team_id` | int | - | - | - | idx_fsr_team |
+| `category_id` | int | not null | - | - | idx_fsr_category |
+| `member_folder_id` | int | - | - | - | idx_fsr_member_folder |
+| `team_folder_id` | int | - | - | - | idx_fsr_team_folder |
+| `priority` | int | not null | 0 | - | idx_fsr_priority |
+| `is_active` | boolean | not null | true | - | idx_fsr_active |
+| + base_entity | | | | | |
+
+**제약조건:**
+- `ck_fsr_scope`: scope_type IN ('member','team')
+- `ck_fsr_scope_match`: (member 스코프는 owner_member_id 필수, team 스코프는 team_id 필수)
+
+---
+
+### link_enrichment (enrichment 스키마)
+
+사용자가 URL에 대해 "자동 채우기"를 실행했을 때의 단위. 메타데이터 수집, 자동분류/키워드 추출의 상태·결과·오류·성능 정보를 저장.
+
+| 컬럼명 | 타입 | NULL | 기본값 | Index |
+|--------|------|------|--------|-------|
+| `link_enrichment_id` | int | not null | identity | - |
+| `link_id` | bigint | not null | - | idx_link_enrichment_link_id |
+| `request_url` | text | not null | - | - |
+| `final_url` | text | - | - | - |
+| `fetch_status` | varchar(20) | not null | 'pending' | idx_link_enrichment_fetch_status |
+| `classify_status` | varchar(20) | not null | 'pending' | idx_link_enrichment_classify_status |
+| `attempt_count` | smallint | not null | 0 | idx_link_enrichment_attempt_count |
+| `last_attempt_at` | timestamptz | - | - | idx_link_enrichment_last_attempt_at |
+| `error_code` | varchar(50) | - | - | idx_link_enrichment_error_code |
+| `error_message` | text | - | - | - |
+| `http_status` | int | - | - | - |
+| `latency_ms` | int | - | - | - |
+| `selected_site_name` | varchar(255) | - | - | - |
+| `selected_title` | text | - | - | - |
+| `selected_description` | text | - | - | - |
+| `fetched_at` | timestamptz | - | - | idx_link_enrichment_fetched_at |
+| `predicted_category_id` | int | - | - | idx_link_enrichment_predicted_category_id |
+| `predicted_score` | numeric(5,4) | - | - | - |
+| `classifier_version` | varchar(50) | - | - | idx_link_enrichment_classifier_version |
+| `classified_at` | timestamptz | - | - | idx_link_enrichment_classified_at |
+| `keyword_extractor_version` | varchar(50) | - | - | idx_link_enrichment_keyword_extractor_version |
+| `keyword_source` | varchar(30) | - | - | idx_link_enrichment_keyword_source |
+| `keyword_extracted_at` | timestamptz | - | - | idx_link_enrichment_keyword_extracted_at |
+| `suggested_member_folder_id` | int | - | - | idx_link_enrichment_suggested_member_folder_id |
+| `suggested_team_folder_id` | int | - | - | idx_link_enrichment_suggested_team_folder_id |
+| + base_entity | | | | |
+
+---
+
+### link_enrichment_keyword (enrichment 스키마 - 정규화)
+
+자동 채우기 실행(link_enrichment) 결과로 추출된 추천 키워드/해시태그를 정규화하여 저장. JSON 배열 대신 행 단위로 저장해 검색/집계/랭킹/중복제거가 쉬움.
+
+| 컬럼명 | 타입 | NULL | 기본값 | Unique | Index |
+|--------|------|------|--------|--------|-------|
+| `link_enrichment_keyword_id` | bigint | not null | identity | PK | - |
+| `link_enrichment_id` | int | not null | - | uq_link_enrich_kw(enrichment,keyword) | idx_link_enrich_kw_enrichment |
+| `keyword` | varchar(100) | not null | - | - | idx_link_enrich_kw_keyword |
+| `score` | numeric(5,4) | - | - | - | - |
+| `rank` | smallint | not null | 0 | - | - |
+| `source` | varchar(30) | - | - | - | - |
+| `created_at` | timestamptz | not null | now() | - | idx_link_enrich_kw_created_at |
+
+---
+
+### link_enrichment_feedback (enrichment 스키마 - 로그)
+
+동채우기 추천 결과에 대해 사용자가 실제로 어떻게 행동했는지(수락/이동/무시)를 기록. 룰 개선/추천 품질 측정의 핵심 데이터.
+
+| 컬럼명 | 타입 | NULL | 기본값 | Index |
+|--------|------|------|--------|-------|
+| `link_enrichment_feedback_id` | int | not null | identity | - |
+| `link_enrichment_id` | int | not null | - | idx_lef_enrichment |
+| `member_saved_link_id` | int | - | - | idx_lef_saved_link |
+| `action` | varchar(20) | not null | - | idx_lef_action |
+| `suggested_member_folder_id` | int | - | - | - |
+| `final_member_folder_id` | int | - | - | idx_lef_final_folder |
+| `created_at` | timestamptz | not null | now() | idx_lef_created_at |
+
+---
+
+## 버전 정보
+
+- **v0.3.0** (현재): 14개 테이블 완성 (개인 도메인 전체)
+- **v0.4.0** (예정): 팀 도메인 7개 테이블 추가
+
+자세한 스키마 정의는 Excel 파일 `searchweb_data_definition_document_v0.3.0.xlsx` 참고.

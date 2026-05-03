@@ -1,0 +1,647 @@
+{
+  "file_path": "docs/data_specs/searchweb_data_definition_document_v0.3.0.xlsx",
+  "total_sheets": 4,
+  "sheets": [
+    {
+      "sheet_name": "변경사항",
+      "row_count": 43,
+      "column_count": 6,
+      "columns": [
+        {
+          "index": 1,
+          "name": "Unnamed: 0",
+          "type": "unknown",
+          "non_null_count": 0,
+          "null_count": 43,
+          "sample_values": []
+        },
+        {
+          "index": 2,
+          "name": "Unnamed: 1",
+          "type": "string",
+          "non_null_count": 38,
+          "null_count": 5,
+          "sample_values": [
+            "v0.2.1 -> v0.3.0 변경사항",
+            "No",
+            1,
+            2,
+            3
+          ]
+        },
+        {
+          "index": 3,
+          "name": "Unnamed: 2",
+          "type": "str",
+          "non_null_count": 25,
+          "null_count": 18,
+          "sample_values": [
+            "변경 구분",
+            "스키마 변경",
+            "문서 수정",
+            "스키마 추가",
+            "관계 변경"
+          ]
+        },
+        {
+          "index": 4,
+          "name": "Unnamed: 3",
+          "type": "str",
+          "non_null_count": 25,
+          "null_count": 18,
+          "sample_values": [
+            "변경 내용",
+            "*_user 테이블명&컬럼명 변경",
+            "app_member 테이블명 변경",
+            "category_master unique 변경",
+            "folder_suggestion_rule 변경"
+          ]
+        },
+        {
+          "index": 5,
+          "name": "Unnamed: 4",
+          "type": "str",
+          "non_null_count": 21,
+          "null_count": 22,
+          "sample_values": [
+            "상세",
+            "(기존) *_user -> (변경) *_member",
+            "(기존) app_member -> (변경) member",
+            "(기존) uq_category_name(parent_category_id, category_name) 하나로 처리\n(변경)\n- uq_category_root_name(category_name) WHERE parent_category_id IS NULL AND deleted_at IS NULL\n- uq_category_child_name(parent_category_id, category_name) WHERE parent_category_id IS NOT NULL AND deleted_at IS NULL",
+            "(기존) unique(scope_type, owner_member_id, team_id, category_id) WHERE is_active=true\n(변경) \n① uq_fsr_member_owner_category(owner_member_id, category_id) WHERE scope_type='member' AND is_active=true AND deleted_at IS NULL \n② uq_fsr_team_category(team_id, category_id) WHERE scope_type='team' AND is_active=true AND deleted_at IS NULL"
+          ]
+        },
+        {
+          "index": 6,
+          "name": "Unnamed: 5",
+          "type": "str",
+          "non_null_count": 5,
+          "null_count": 38,
+          "sample_values": [
+            "비고",
+            "매핑 테이블 제외\n- link_enrichment_keyword\n- user_saved_link_tag"
+          ]
+        }
+      ]
+    },
+    {
+      "sheet_name": "테이블 정의서",
+      "row_count": 14,
+      "column_count": 13,
+      "columns": [
+        {
+          "index": 1,
+          "name": "CLASSIFICATION",
+          "type": "str",
+          "non_null_count": 14,
+          "null_count": 0,
+          "sample_values": [
+            "base",
+            "auth",
+            "taxonomy",
+            "member",
+            "link"
+          ]
+        },
+        {
+          "index": 2,
+          "name": "TABLE",
+          "type": "str",
+          "non_null_count": 14,
+          "null_count": 0,
+          "sample_values": [
+            "base_entity",
+            "member",
+            "oauth_member",
+            "category_master",
+            "member_folder"
+          ]
+        },
+        {
+          "index": 3,
+          "name": "OWNER/SCOPE",
+          "type": "str",
+          "non_null_count": 14,
+          "null_count": 0,
+          "sample_values": [
+            "공통(개인/시스템 범용, 매핑 테이블 제외)",
+            "공통",
+            "개인",
+            "개인(유저별)",
+            "개인/팀"
+          ]
+        },
+        {
+          "index": 4,
+          "name": "CATEGORY",
+          "type": "str",
+          "non_null_count": 14,
+          "null_count": 0,
+          "sample_values": [
+            "BASE",
+            "TRX",
+            "MAP",
+            "MST",
+            "RULE"
+          ]
+        },
+        {
+          "index": 5,
+          "name": "TABLE_DESCRIPTION",
+          "type": "str",
+          "non_null_count": 14,
+          "null_count": 0,
+          "sample_values": [
+            "매핑 테이블을 제외한 전 테이블에 공통 적용되는 베이스 컬럼 세트(생성/수정/삭제 시각 + 생성/수정/삭제자)",
+            "서비스 사용자 계정 기본 정보(로그인 식별자, 표시 이름, 상태, 생성/수정/삭제 시각)를 저장한다. 팀/폴더/링크 저장 등 대부분 기능에서 참조되는 최상위 엔티티다.",
+            "소셜 로그인(제공자/제공자 사용자키)과 내부 사용자 계정을 매핑한다. 일반 로그인만 쓰면 생략 가능하다.",
+            "링크 자동 분류에 사용하는 카테고리 마스터다. 현재는 대분류만 운영하므로 parent_category_id는 NULL로 유지하되, 확장 대비 트리 구조를 지원한다.",
+            "개인 사용자가 소유하는 폴더를 저장한다. parent_folder_id로 최대 2층 구조를 지원한다."
+          ]
+        },
+        {
+          "index": 6,
+          "name": "PRIMARY_KEY",
+          "type": "str",
+          "non_null_count": 14,
+          "null_count": 0,
+          "sample_values": [
+            "없음(공통 컬럼 세트로 적용)",
+            "member_id",
+            "member_oauth_id",
+            "category_id",
+            "member_folder_id"
+          ]
+        },
+        {
+          "index": 7,
+          "name": "SOFT_DELETE",
+          "type": "str",
+          "non_null_count": 14,
+          "null_count": 0,
+          "sample_values": [
+            "Y",
+            "N"
+          ]
+        },
+        {
+          "index": 8,
+          "name": "주요 관계",
+          "type": "str",
+          "non_null_count": 13,
+          "null_count": 1,
+          "sample_values": [
+            "team.owner_member_id, team_member.member_id, folder.owner_member_id, saved_link.member_id 참조",
+            "member_oauth.member_id → member.member_id",
+            "link.primary_category_id → category.category_id, saved_link.primary_category_id → category.category_id",
+            "member_folder.owner_member_id → member.member_id, member_folder.parent_folder_id → member_folder.member_folder_id, member_folder_tag.member_folder_id → member_folder.member_folder_id",
+            "member_saved_link.member_folder_id → member_folder.member_folder_id, member_saved_link.link_id → link.link_id, member_saved_link.primary_category_id → category.category_id, member_saved_link_tag.member_saved_link_id → member_saved_link.member_saved_link_id"
+          ]
+        },
+        {
+          "index": 9,
+          "name": "비고",
+          "type": "str",
+          "non_null_count": 13,
+          "null_count": 1,
+          "sample_values": [
+            "실제 DB 물리 테이블이 아닌 “공통 컬럼 규약/템플릿(믹스인)”으로 사용 권장",
+            "이메일/로그인ID 유니크, login_id/password_hash 페어 체크 권장\n베이스 엔티티 사용",
+            "provider+provider_member_key 유니크 권장\n베이스 엔티티 사용",
+            "대분류만이면 category_level=1 고정 운영\n베이스 엔티티 사용",
+            "2층 제한 트리거/앱 검증, (owner_member_id,parent_folder_id,folder_name) 부분 UNIQUE 권장\n베이스 엔티티 사용"
+          ]
+        },
+        {
+          "index": 10,
+          "name": "Unnamed: 9",
+          "type": "unknown",
+          "non_null_count": 0,
+          "null_count": 14,
+          "sample_values": []
+        },
+        {
+          "index": 11,
+          "name": "구분자 코드",
+          "type": "str",
+          "non_null_count": 11,
+          "null_count": 3,
+          "sample_values": [
+            "BASE",
+            "MST",
+            "REF",
+            "TRX",
+            "MAP"
+          ]
+        },
+        {
+          "index": 12,
+          "name": "유형명",
+          "type": "str",
+          "non_null_count": 11,
+          "null_count": 3,
+          "sample_values": [
+            "공통 베이스/템플릿",
+            "마스터",
+            "레퍼런스",
+            "트랜잭션(본체)",
+            "매핑(N:M)"
+          ]
+        },
+        {
+          "index": 13,
+          "name": "언제 쓰는지(판별 기준)",
+          "type": "str",
+          "non_null_count": 11,
+          "null_count": 3,
+          "sample_values": [
+            "물리 테이블이라기보다 여러 테이블이 공유하는 공통 컬럼 세트(soft delete, audit 등)를 정의할 때",
+            "기준/참조 데이터(상대적으로 변경 빈도 낮음). 목록/분류/코드 성격",
+            "외부/표준 코드나 사내 공통 참조(출처가 외부 또는 “공통 규격” 성격)",
+            "서비스의 핵심 엔티티/행위 데이터. 계속 생성/수정/삭제가 발생",
+            "두 엔티티를 연결/부착하는 관계 테이블. 보통 복합 PK/UNIQUE"
+          ]
+        }
+      ]
+    },
+    {
+      "sheet_name": "컬럼 정의서",
+      "row_count": 196,
+      "column_count": 14,
+      "columns": [
+        {
+          "index": 1,
+          "name": "CLASSIFICATION",
+          "type": "str",
+          "non_null_count": 6,
+          "null_count": 190,
+          "sample_values": [
+            "base",
+            "auth",
+            "taxonomy",
+            "member",
+            "link"
+          ]
+        },
+        {
+          "index": 2,
+          "name": "TABLE",
+          "type": "str",
+          "non_null_count": 14,
+          "null_count": 182,
+          "sample_values": [
+            "base_entity",
+            "member",
+            "oauth_member",
+            "category_master",
+            "member_folder"
+          ]
+        },
+        {
+          "index": 3,
+          "name": "COLUMN",
+          "type": "str",
+          "non_null_count": 163,
+          "null_count": 33,
+          "sample_values": [
+            "created_at",
+            "updated_at",
+            "deleted_at",
+            "created_by_member_id",
+            "updated_by_member_id"
+          ]
+        },
+        {
+          "index": 4,
+          "name": "TYPE",
+          "type": "str",
+          "non_null_count": 163,
+          "null_count": 33,
+          "sample_values": [
+            "timestamptz",
+            "bigint",
+            "varchar(255)",
+            "varchar(50)",
+            "varchar(20)"
+          ]
+        },
+        {
+          "index": 5,
+          "name": "PK",
+          "type": "str",
+          "non_null_count": 13,
+          "null_count": 183,
+          "sample_values": [
+            "Y"
+          ]
+        },
+        {
+          "index": 6,
+          "name": "Logical FK",
+          "type": "str",
+          "non_null_count": 58,
+          "null_count": 138,
+          "sample_values": [
+            "member.member_id",
+            "category_master.category_id",
+            "member_folder.member_folder_id",
+            "link.link_id",
+            "link_enrichment.link_enrichment_id"
+          ]
+        },
+        {
+          "index": 7,
+          "name": "Physical FK",
+          "type": "str",
+          "non_null_count": 58,
+          "null_count": 138,
+          "sample_values": [
+            "N",
+            "Y"
+          ]
+        },
+        {
+          "index": 8,
+          "name": "NULL",
+          "type": "str",
+          "non_null_count": 76,
+          "null_count": 120,
+          "sample_values": [
+            "not null"
+          ]
+        },
+        {
+          "index": 9,
+          "name": "DEFAULT",
+          "type": "string",
+          "non_null_count": 49,
+          "null_count": 147,
+          "sample_values": [
+            "now()",
+            "generated always as identity",
+            "'active'",
+            1,
+            "'system'"
+          ]
+        },
+        {
+          "index": 10,
+          "name": "UNIQUE",
+          "type": "str",
+          "non_null_count": 19,
+          "null_count": 177,
+          "sample_values": [
+            "uq_member_email(email)",
+            "uq_member_login_id(login_id)",
+            "uq_oauth_member_provider_key(provider, provider_member_key)",
+            "uq_category_child_name(parent_category_id, category_name) WHERE parent_category_id IS NOT NULL AND deleted_at IS NULL",
+            "① uq_category_root_name(category_name) WHERE parent_category_id IS NULL AND deleted_at IS NULL\n② uq_category_child_name(parent_category_id, category_name) WHERE parent_category_id IS NOT NULL AND deleted_at IS NULL"
+          ]
+        },
+        {
+          "index": 11,
+          "name": "CHECK",
+          "type": "str",
+          "non_null_count": 21,
+          "null_count": 175,
+          "sample_values": [
+            "ck_member_login_pw_pair: (login_id is null and password_hash is null) OR (login_id is not null and password_hash is not null)",
+            "ck_member_status: status in ('active','blocked')",
+            "ck_category_level: category_level in (1,2)",
+            "ck_member_saved_link_category_source: category_source in ('system','member')",
+            "ck_member_saved_link_category_score: category_score is null or (category_score between 0 and 1)"
+          ]
+        },
+        {
+          "index": 12,
+          "name": "INDEX",
+          "type": "str",
+          "non_null_count": 76,
+          "null_count": 120,
+          "sample_values": [
+            "(선택)",
+            "idx_<table>_deleted_at(deleted_at)",
+            "idx_member_status(status)",
+            "idx_member_created_at(created_at)",
+            "idx_member_deleted_at(deleted_at)"
+          ]
+        },
+        {
+          "index": 13,
+          "name": "DESCRIPTION",
+          "type": "str",
+          "non_null_count": 163,
+          "null_count": 33,
+          "sample_values": [
+            "생성 시각",
+            "마지막 수정 시각(UPDATE 시 갱신)",
+            "소프트 삭제 시각(NULL이면 미삭제)",
+            "생성자 사용자 ID(논리 참조)",
+            "수정자 사용자 ID(논리 참조)"
+          ]
+        },
+        {
+          "index": 14,
+          "name": "Unnamed: 13",
+          "type": "str",
+          "non_null_count": 3,
+          "null_count": 193,
+          "sample_values": [
+            "비활성화"
+          ]
+        }
+      ]
+    },
+    {
+      "sheet_name": "팀 관련 문서",
+      "row_count": 72,
+      "column_count": 14,
+      "columns": [
+        {
+          "index": 1,
+          "name": "Unnamed: 0",
+          "type": "unknown",
+          "non_null_count": 0,
+          "null_count": 72,
+          "sample_values": []
+        },
+        {
+          "index": 2,
+          "name": "Unnamed: 1",
+          "type": "str",
+          "non_null_count": 15,
+          "null_count": 57,
+          "sample_values": [
+            "테이블 정의서",
+            "TABLE",
+            "team",
+            "team_member",
+            "team_folder"
+          ]
+        },
+        {
+          "index": 3,
+          "name": "Unnamed: 2",
+          "type": "str",
+          "non_null_count": 16,
+          "null_count": 56,
+          "sample_values": [
+            "TABLE_DESCRIPTION",
+            "팀(그룹) 메타 정보(이름, 소유자, 생성/수정/삭제)를 저장한다. 팀 폴더 공유 기능의 기준 단위다.",
+            "팀과 사용자의 소속 관계를 저장한다. 역할 기반 권한 체크 및 팀 폴더 접근 기준이 된다.",
+            "팀이 공유하는 폴더를 저장한다. parent_folder_id로 최대 2층 구조를 지원한다.",
+            "(선택) 팀 폴더에 사용자별 권한(viewer/editor)을 부여한다. 팀원 전원 동일 권한이면 사용하지 않아도 된다."
+          ]
+        },
+        {
+          "index": 4,
+          "name": "Unnamed: 3",
+          "type": "str",
+          "non_null_count": 55,
+          "null_count": 17,
+          "sample_values": [
+            "OWNER/SCOPE",
+            "공통",
+            "팀",
+            "팀(팀별)",
+            "COLUMN"
+          ]
+        },
+        {
+          "index": 5,
+          "name": "Unnamed: 4",
+          "type": "str",
+          "non_null_count": 55,
+          "null_count": 17,
+          "sample_values": [
+            "PRIMARY_KEY",
+            "team_id",
+            "team_member_id",
+            "team_folder_id",
+            "team_folder_permission_id"
+          ]
+        },
+        {
+          "index": 6,
+          "name": "Unnamed: 5",
+          "type": "str",
+          "non_null_count": 12,
+          "null_count": 60,
+          "sample_values": [
+            "SOFT_DELETE",
+            "O",
+            "PK"
+          ]
+        },
+        {
+          "index": 7,
+          "name": "Unnamed: 6",
+          "type": "str",
+          "non_null_count": 24,
+          "null_count": 48,
+          "sample_values": [
+            "주요 관계",
+            "team.owner_user_id → user.user_id, folder.team_id → team.team_id",
+            "team_member.team_id → team.team_id, team_member.user_id → user.user_id",
+            "team_folder.team_id → team.team_id, team_folder.created_by_user_id → app_user.user_id, team_folder.parent_folder_id → team_folder.team_folder_id, team_folder_permission.team_folder_id → team_folder.team_folder_id, team_folder_tag.team_folder_id → team_folder.team_folder_id",
+            "team_folder_permission.team_folder_id → team_folder.team_folder_id, team_folder_permission.user_id → app_user.user_id"
+          ]
+        },
+        {
+          "index": 8,
+          "name": "Unnamed: 7",
+          "type": "str",
+          "non_null_count": 17,
+          "null_count": 55,
+          "sample_values": [
+            "비고",
+            "팀명 중복 정책 필요",
+            "탈퇴/추방 이력 필요 시 컬럼 추가. UNIQUE(team_id, user_id)로 중복 방지",
+            "2층 제한 트리거/앱 검증, (team_id,parent_folder_id,folder_name) 부분 UNIQUE 권장",
+            "(team_folder_id, user_id) UNIQUE로 중복 방지"
+          ]
+        },
+        {
+          "index": 9,
+          "name": "Unnamed: 8",
+          "type": "str",
+          "non_null_count": 37,
+          "null_count": 35,
+          "sample_values": [
+            "not null"
+          ]
+        },
+        {
+          "index": 10,
+          "name": "Unnamed: 9",
+          "type": "string",
+          "non_null_count": 21,
+          "null_count": 51,
+          "sample_values": [
+            "DEFAULT",
+            "generated always as identity",
+            "now()",
+            "'member'",
+            "'viewer'"
+          ]
+        },
+        {
+          "index": 11,
+          "name": "Unnamed: 10",
+          "type": "str",
+          "non_null_count": 11,
+          "null_count": 61,
+          "sample_values": [
+            "UNIQUE",
+            "uq_team_member_team_user(team_id, user_id)",
+            "uq_team_folder_parent_name(team_id, parent_folder_id, folder_name) where deleted_at is null",
+            "uq_team_folder_permission_folder_user(team_folder_id, user_id)",
+            "uq_team_saved_link_folder_link(team_folder_id, link_id) where deleted_at is null"
+          ]
+        },
+        {
+          "index": 12,
+          "name": "Unnamed: 11",
+          "type": "str",
+          "non_null_count": 6,
+          "null_count": 66,
+          "sample_values": [
+            "CHECK",
+            "ck_team_member_role: role in ('owner','admin','member')",
+            "ck_tfp_permission: permission in ('viewer','editor')",
+            "ck_team_saved_link_category_source: category_source in ('system','user')",
+            "ck_team_saved_link_category_score: category_score is null or (category_score between 0 and 1)"
+          ]
+        },
+        {
+          "index": 13,
+          "name": "Unnamed: 12",
+          "type": "str",
+          "non_null_count": 28,
+          "null_count": 44,
+          "sample_values": [
+            "INDEX",
+            "idx_team_name(team_name)",
+            "idx_team_owner(owner_user_id)",
+            "idx_team_deleted(deleted_at)",
+            "idx_team_member_team(team_id)"
+          ]
+        },
+        {
+          "index": 14,
+          "name": "Unnamed: 13",
+          "type": "str",
+          "non_null_count": 47,
+          "null_count": 25,
+          "sample_values": [
+            "DESCRIPTION",
+            "팀 고유 ID",
+            "팀 이름",
+            "팀 소유자",
+            "생성 시각"
+          ]
+        }
+      ]
+    }
+  ]
+}

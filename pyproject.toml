@@ -1,0 +1,11 @@
+[project]
+name = "sw-test"
+version = "0.1.0"
+description = "Search Web Data Processing and Analysis System"
+requires-python = ">=3.9"
+dependencies = [
+    "openpyxl>=3.1.0",
+    "pandas>=2.0.0",
+    "anthropic>=0.31.0",
+    "pydantic>=2.0.0",
+]

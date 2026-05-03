@@ -79,6 +79,9 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## 프로젝트 규칙
 
+### 실행 규칙
+- uv 가상환경에서 실행.
+
 ### 절약 규칙
 - **이미 읽은 파일은 다시 확인하지 않는다.**
 - 가능한 도구 호출은 동시에 실행한다.
