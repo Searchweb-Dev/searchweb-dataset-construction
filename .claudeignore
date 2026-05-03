@@ -1,0 +1,18 @@
+# 가상 환경 / 패키지
+ai_url_classifier/.venv/
+
+# 컴파일된 Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 생성된 결과물 / 로그
+ai_url_classifier/result/
+output/logs/
+
+# Worktree (메인 코드의 복제본 — 컨텍스트 낭비)
+.worktrees/
+
+# 환경 변수 / 시크릿
+.env
+.envrc
