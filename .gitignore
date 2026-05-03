@@ -228,10 +228,9 @@ result/
 output/
 
 # Claude Code
-.claude/
-CLAUDE.md
-.claudeignore
 harness/
 
-.serena
+.serena/cache/*
+.serena/memories
+
 ai_url_classifier/
