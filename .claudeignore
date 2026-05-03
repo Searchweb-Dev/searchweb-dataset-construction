@@ -16,3 +16,5 @@ output/logs/
 # 환경 변수 / 시크릿
 .env
 .envrc
+
+ai_url_classifier/
