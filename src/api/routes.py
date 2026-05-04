@@ -8,6 +8,7 @@ from src.db.models import AnalysisJob, AISite
 from src.db.session import SessionLocal
 from src.api.deps import verify_api_key
 from src.schemas import AnalysisJobRequest, AnalysisJobResponse, AISiteResponse
+from src.workers.analyze_task import analyze_website
 
 router = APIRouter()
 
@@ -63,6 +64,9 @@ def analyze(
     db.add(job)
     db.commit()
     db.refresh(job)
+
+    # Celery 비동기 작업 시작
+    analyze_website.delay(str(job.job_id), url)
 
     return AnalysisJobResponse(
         job_id=job.job_id,
