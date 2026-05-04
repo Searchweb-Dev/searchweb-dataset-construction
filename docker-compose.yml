@@ -1,4 +1,4 @@
-"""Docker Compose 설정: API + Worker + Redis + PostgreSQL."""
+# Docker Compose 설정: API + Worker + Redis + PostgreSQL.
 
 version: '3.8'
 
