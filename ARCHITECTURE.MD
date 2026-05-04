@@ -5,18 +5,18 @@
 ## Overview
 
 이 프로젝트는 URL을 입력받아 웹사이트를 분석하고,
-해당 사이트가 유용한 AI 서비스인지 평가하는 독립형 Worker 시스템이다.
+해당 사이트가 유용한 AI 서비스인지 판별하는 **AI 사이트 분석 Worker** 시스템이다.
 
-Worker는 Spring Backend와 분리된 서비스로 동작하며,
+Spring Backend와 분리되어 독립적으로 동작하며,
 다음 기능을 담당한다:
 
-- FastAPI 기반 비동기 API
-- Celery를 통한 작업 큐 관리
-- **MCP (Model Context Protocol)를 통한 Claude 통합**
-- Claude의 Playwright 도구로 웹 렌더링
-- Claude의 AI 사이트 지능형 분석 (판별, 분류, 점수화, 요약)
-- 결과 검증 및 정규화 (Pydantic)
-- PostgreSQL에 영구 저장
+- FastAPI 기반 비동기 API (Spring Backend와 통신)
+- Celery를 통한 비동기 분석 작업 처리
+- **Claude API + MCP (Model Context Protocol) 통합**
+- Playwright로 웹사이트 렌더링 및 콘텐츠 추출
+- Claude를 통한 AI 사이트 판별 (판별, 분류, 점수화, 요약)
+- 분석 결과 저장 (PostgreSQL)
+- 분석 상태 관리 (Redis)
 
 ---
 
