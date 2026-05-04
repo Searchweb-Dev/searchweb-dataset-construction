@@ -234,3 +234,5 @@ harness/
 .serena/memories
 
 ai_url_classifier/
+
+test.db
