@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Optional, Any
 from anthropic import Anthropic
 
@@ -15,6 +16,7 @@ class WebAnalyzer:
         """Claude 클라이언트 초기화."""
         self.client = Anthropic(api_key=api_key)
         self.model = "claude-sonnet-4-6"
+        self.cache_stats = {"hits": 0, "misses": 0}
 
     def analyze_website(
         self,
@@ -23,6 +25,8 @@ class WebAnalyzer:
         screenshot_base64: Optional[str] = None,
     ) -> dict[str, Any]:
         """웹사이트를 분석하여 AI 여부 및 분류 판정."""
+        
+        start_time = time.time()
         
         messages = [
             {
@@ -51,11 +55,30 @@ class WebAnalyzer:
             model=self.model,
             max_tokens=2048,
             messages=messages,
-            system=self._get_system_prompt(),
+            system=[
+                {
+                    "type": "text",
+                    "text": self._get_system_prompt(),
+                    "cache_control": {"type": "ephemeral"}
+                }
+            ],
         )
 
         # Claude 응답 파싱
         result = self._parse_response(response.content[0].text)
+        
+        # 캐시 통계 추가
+        usage = response.usage
+        if hasattr(usage, 'cache_read_input_tokens') and usage.cache_read_input_tokens:
+            self.cache_stats["hits"] += 1
+            logger.info(f"캐시 히트: {usage.cache_read_input_tokens} 토큰 절감")
+        else:
+            self.cache_stats["misses"] += 1
+            logger.info(f"캐시 미스: 새로운 캐시 생성")
+        
+        elapsed = time.time() - start_time
+        logger.info(f"분석 완료: {elapsed:.2f}초")
+        
         return result
 
     def _build_analysis_prompt(self, url: str, page_content: str) -> str:
@@ -137,3 +160,18 @@ JSON 형식으로만 반환하세요.
             },
             "confidence": 0,
         }
+
+    def get_cache_stats(self) -> dict[str, Any]:
+        """캐시 통계 반환."""
+        total = self.cache_stats["hits"] + self.cache_stats["misses"]
+        hit_rate = (self.cache_stats["hits"] / total * 100) if total > 0 else 0
+        return {
+            "total_requests": total,
+            "cache_hits": self.cache_stats["hits"],
+            "cache_misses": self.cache_stats["misses"],
+            "hit_rate": f"{hit_rate:.1f}%",
+        }
+
+    def reset_cache_stats(self):
+        """캐시 통계 초기화."""
+        self.cache_stats = {"hits": 0, "misses": 0}

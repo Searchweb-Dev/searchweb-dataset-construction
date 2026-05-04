@@ -1,6 +1,6 @@
 """AI 사이트 분석 API 라우트."""
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -87,7 +87,12 @@ def get_job_status(
     db: Session = Depends(get_db),
 ):
     """분석 작업 상태 조회."""
-    job = db.query(AnalysisJob).filter(AnalysisJob.job_id == job_id).first()
+    try:
+        job_uuid = UUID(job_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid job_id format")
+
+    job = db.query(AnalysisJob).filter(AnalysisJob.job_id == job_uuid).first()
 
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
