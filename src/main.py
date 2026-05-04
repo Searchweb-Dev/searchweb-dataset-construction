@@ -1,18 +1,21 @@
 """FastAPI 메인 앱."""
 
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import folders, saved_links, tags, links
 from src.db.models.base import Base
 from src.db.session import engine
+from src.api import routes
 
-# 테이블 생성
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="SearchWeb API", version="0.1.0")
+app = FastAPI(
+    title="AI Site Detection Worker",
+    version="0.1.0",
+    description="Claude + MCP 기반 AI 웹사이트 판별 Worker"
+)
 
-# CORS 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -21,11 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 라우터 등록
-app.include_router(folders.router)
-app.include_router(saved_links.router)
-app.include_router(tags.router)
-app.include_router(links.router)
+app.include_router(routes.router, prefix="/api/v1")
 
 
 @app.get("/health")
