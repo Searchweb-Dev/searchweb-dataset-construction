@@ -6,7 +6,7 @@ from typing import Optional, Any
 from sqlalchemy.orm import Session
 
 from src.db.models import AISite, AICategory, AITag
-from src.ai.analyzer import WebAnalyzer
+from src.ai.analyzer import get_analyzer
 from src.ai.mcp_tools import render_website_sync
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class AIDetector:
     def __init__(self, db: Session):
         """AI 판별기 초기화."""
         self.db = db
-        self.analyzer = WebAnalyzer()
+        self.analyzer = get_analyzer()
 
     def detect_and_save(self, url: str) -> Optional[dict[str, Any]]:
         """웹사이트를 분석하고 결과를 DB에 저장."""
