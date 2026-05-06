@@ -206,7 +206,7 @@ async def render_with_playwright(url: str) -> str:
 
 #### **방식 B: Playwright MCP (권장)**
 
-**MCP (Model Context Protocol)**는 Claude가 직접 웹사이트를 분석할 수 있는 표준 프로토콜이다.
+**MCP (Model Context Protocol)**는 LLM이 직접 웹사이트를 분석할 수 있는 표준 프로토콜이다.
 
 ```python
 # Worker: Playwright MCP 서버 구동
@@ -220,70 +220,61 @@ async def start_mcp_server():
     await mcp_server.start()
 
 # 2. LLM이 MCP를 통해 렌더링 요청
-# Claude의 지시:
+# LLM의 지시:
 # "https://example.com 의 콘텐츠를 분석해줘"
 # ↓
-# Claude가 내부적으로 MCP 호출:
+# LLM이 내부적으로 MCP 호출:
 # fetch_page("https://example.com")
 # ↓
 # Worker의 Playwright가 렌더링
 # ↓
-# 결과를 Claude에게 전달
+# 결과를 LLM에게 전달
 
 # 3. Worker 코드는 매우 간단
 async def analyze_with_mcp(url: str) -> dict:
-    """MCP를 통해 Claude가 직접 분석"""
-    
-    from anthropic import Anthropic
-    
-    client = Anthropic()
-    
-    response = client.messages.create(
-        model="claude-3-5-sonnet-20241022",
-        max_tokens=2000,
-        tools=[
-            {
-                "type": "mcp",
-                "name": "playwright"
-                # MCP 서버가 자동으로 제공
-            }
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": f"""
-                다음 URL을 분석해줘: {url}
-                
-                1. AI 서비스인지 판별
-                2. 카테고리 분류
-                3. 유용성 점수 (1-10)
-                4. 신뢰도 점수 (1-10)
-                5. 한 문장 요약
-                
-                응답은 JSON 형식으로.
-                """
-            }
-        ]
+    """MCP를 통해 Gemini가 직접 분석"""
+
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-lite",
+        contents=f"""
+        다음 URL을 분석해줘: {url}
+
+        1. AI 서비스인지 판별
+        2. 카테고리 분류
+        3. 유용성 점수 (1-10)
+        4. 신뢰도 점수 (1-10)
+        5. 한 문장 요약
+
+        응답은 JSON 형식으로.
+        """,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            max_output_tokens=2000,
+        ),
     )
-    
+
     return parse_response(response)
 ```
 
 **특징:**
-- Claude가 자동으로 웹사이트 접근 및 분석
+- LLM이 자동으로 웹사이트 접근 및 분석
 - Worker는 MCP 서버만 제공
-- Claude가 tool use로 필요한 정보 추출
+- LLM이 tool use로 필요한 정보 추출
 
 **장점:**
 - 매우 간단한 구현
-- Claude가 지능적으로 콘텐츠 선택
-- 중복 분석 제거 (Claude가 스스로 판단)
+- LLM이 지능적으로 콘텐츠 선택
+- 중복 분석 제거 (LLM이 스스로 판단)
 - 에러 처리 자동
 
 **단점:**
 - MCP 서버 설정 필요
-- Anthropic SDK만 지원
-- 인터넷 접근 필요 (Claude 측에서)
+- 인터넷 접근 필요 (LLM 측에서)
 
 ---
 
@@ -337,11 +328,11 @@ async def render_with_api(url: str) -> str:
 
 | 항목 | Playwright (A) | MCP (B) |
 |------|----------------|--------|
-| **렌더링 시간** | 30초 | 30초 (동일, Claude 측 포함) |
-| **LLM 분석 시간** | 10초 | 0초 (Claude가 함께) |
+| **렌더링 시간** | 30초 | 30초 (동일, LLM 측 포함) |
+| **LLM 분석 시간** | 10초 | 0초 (LLM이 함께) |
 | **전체 응답** | 40초 | 40초 |
 | **메모리** | 500MB/인스턴스 | 200MB/인스턴스 |
-| **CPU** | 높음 | 낮음 (Claude 측) |
+| **CPU** | 높음 | 낮음 (LLM 측) |
 
 **성능:** 동일 수준
 
@@ -383,18 +374,17 @@ async def analyze(url: str):
 ```python
 # Worker 코드 (매우 간단)
 async def analyze(url: str):
-    client = Anthropic()
-    
-    response = client.messages.create(
-        model="claude-3-5-sonnet-20241022",
-        max_tokens=2000,
-        tools=[{"type": "mcp", "name": "playwright"}],
-        messages=[{
-            "role": "user",
-            "content": f"Analyze {url} as AI service"
-        }]
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-lite",
+        contents=f"Analyze {url} as AI service",
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            max_output_tokens=2000,
+        ),
     )
-    
+
     return parse_response(response)
 
 # + MCP 서버 설정 (한 번만)
@@ -457,7 +447,7 @@ async def analyze_safe(url: str):
 async def analyze_safe(url: str):
     try:
         response = client.messages.create(
-            # Claude가 내부적으로 에러 처리
+            # LLM이 내부적으로 에러 처리
             # - 렌더링 실패
             # - 콘텐츠 파싱 실패
             # - MCP 호출 실패
@@ -485,10 +475,10 @@ async def analyze_safe(url: str):
 ❌ 지속적인 유지보수
 
 **방식 B:**
-- Claude 업데이트 자동
+- LLM 업데이트 자동
 - MCP 표준만 준수
-- 에러는 Claude가 처리
-- 성능 최적화는 Anthropic이 담당
+- 에러는 LLM이 처리
+- 성능 최적화는 LLM 제공사가 담당
 
 ✅ 최소 유지보수
 
@@ -503,8 +493,8 @@ async def analyze_safe(url: str):
 | **에러 처리** | 복잡 | 자동 |
 | **응답 시간** | 40초 | 40초 |
 | **메모리** | 높음 | 낮음 |
-| **의존성** | Playwright | Anthropic SDK |
-| **확장성** | 중간 | 높음 (Claude 개선) |
+| **의존성** | Playwright | google-genai SDK |
+| **확장성** | 중간 | 높음 (LLM 개선) |
 
 **선택: MCP 방식**
 
@@ -512,7 +502,7 @@ async def analyze_safe(url: str):
 1. 구현이 매우 간단 (100줄 → 20줄)
 2. 에러 처리 자동
 3. 유지보수 비용 최소
-4. 미래 Claude 개선이 자동 적용
+4. 미래 LLM 개선이 자동 적용
 5. 성능 동일
 
 ---

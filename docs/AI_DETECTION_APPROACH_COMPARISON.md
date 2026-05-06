@@ -14,7 +14,7 @@ AI 사이트 판별은 Worker의 핵심 기능이다.
 ```
 Content Extraction
     ↓
-OpenAI/Claude API
+Gemini/OpenAI API
     ↓
 LLM 분석:
   - 문맥 이해 (semantic understanding)
@@ -294,7 +294,7 @@ async def hybrid_classify(extracted_content: dict, url: str) -> dict:
 
 ## 5. 프로젝트 맥락에서의 선택
 
-### 선택: **LLM 기반 (OpenAI/Claude)**
+### 선택: **LLM 기반 (Gemini/OpenAI)**
 
 **이유:**
 

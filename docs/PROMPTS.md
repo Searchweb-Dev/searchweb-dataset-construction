@@ -1,9 +1,8 @@
-# Claude Prompts for AI Analysis
+# Gemini Prompts for AI Analysis
 
-## System Prompt (캐싱 전용)
+## System Prompt
 
 모든 분석 요청에서 동일하게 사용되는 시스템 프롬프트입니다.
-**Prompt Caching으로 90% 토큰 절감됩니다.**
 
 ```python
 SYSTEM_PROMPT = """You are an AI service analyzer. Analyze websites and classify them.
@@ -32,7 +31,7 @@ user_message = f"Analyze {url}: is_ai_tool, category (level_1, level_2, level_3,
 
 ## Expected Response Schema
 
-Claude가 반환해야 하는 JSON 형식입니다.
+Gemini가 반환해야 하는 JSON 형식입니다.
 
 ```json
 {
@@ -57,42 +56,29 @@ Claude가 반환해야 하는 JSON 형식입니다.
 ## Implementation Example
 
 ```python
-from anthropic import Anthropic
+from google import genai
+from google.genai import types
 
 SYSTEM_PROMPT = """You are an AI service analyzer. Analyze websites and classify them.
 ...
 Respond in JSON format only, no markdown."""
 
-async def analyze_with_mcp(url: str) -> dict:
-    """Claude가 직접 웹사이트를 분석 (Prompt Caching 활용)"""
-    
-    client = Anthropic()
-    
-    response = client.messages.create(
-        model="claude-3-5-sonnet-20241022",
-        max_tokens=500,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"}  # 캐싱 활성화
-            }
-        ],
-        tools=[
-            {
-                "type": "mcp",
-                "name": "playwright"
-            }
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": f"Analyze {url}: is_ai_tool, category (level_1, level_2, level_3, tags), scores (utility/trust/originality 1-10), summary (한국어)"
-            }
-        ]
+async def analyze_with_gemini(url: str) -> dict:
+    """Gemini가 직접 웹사이트를 분석"""
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-lite",
+        contents=f"Analyze {url}: is_ai_tool, category (level_1, level_2, level_3, tags), scores (utility/trust/originality 1-10), summary (한국어)",
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            response_mime_type="application/json",
+            max_output_tokens=500,
+        ),
     )
-    
-    return parse_claude_response(response)
+
+    return parse_gemini_response(response)
 ```
 
 ---
