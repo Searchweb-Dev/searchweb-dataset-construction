@@ -97,7 +97,12 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ### 코드 규칙
 - 한 함수는 하나의 역할만 수행
 - 타입 힌트 필수
-- 클래스나 함수에 간단 설명 docstring을 한글로 작성
+- 파일 형식에 맞는 방식으로 한글 설명 작성:
+  + Python (`.py`): 클래스·함수에 `"""한글 docstring"""`
+  + Dockerfile: 파일 상단 및 주요 블록에 `# 한글 주석`
+  + Docker Compose (`.yml`): 서비스·섹션 위에 `# 한글 주석`
+  + 환경변수 (`.env`, `.env.example`): 항목 위에 `# 한글 주석`
+  + 설정 파일 (`.toml`, `.ini`, `.cfg`): `# 한글 주석`
 - 로그&로깅에는 `logging` 사용, `print()` 사용 금지
 - 불필요한 `---` 사용 자제
 
