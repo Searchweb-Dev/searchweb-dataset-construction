@@ -1,4 +1,4 @@
-"""API 서버 Docker 이미지."""
+# API 서버 Docker 이미지
 
 FROM python:3.13-slim
 
