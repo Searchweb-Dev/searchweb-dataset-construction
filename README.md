@@ -184,7 +184,10 @@ uv run alembic upgrade head
 ## 성능 최적화
 
 ### LLM 프로바이더 선택
-- `LLM_PROVIDER=gemini` (기본): Gemini free tier, 1500 req/day 무료
+- `LLM_PROVIDER=gemini` (기본): Gemini free tier 무료 사용
+  - 모델: `gemini-2.0-flash`
+  - 정확한 사용량 상한(RPM/RPD/TPM)은 계정·등급에 따라 다르며 [AI Studio 비율 제한 페이지](https://aistudio.google.com/rate-limit)에서 확인
+  - 공식 문서: [Gemini API 비율 제한](https://ai.google.dev/gemini-api/docs/rate-limits?hl=ko)
 - `LLM_PROVIDER=claude`: Claude API 유료, 프롬프트 캐싱으로 토큰 절감 (≥80%)
 
 ### 동시 처리

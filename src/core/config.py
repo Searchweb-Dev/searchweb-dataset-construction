@@ -40,6 +40,11 @@ def get_gemini_api_key() -> str:
     return os.getenv("GEMINI_API_KEY", "")
 
 
+def get_gemini_model() -> str:
+    """Gemini 모델명 반환."""
+    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+
+
 def get_claude_api_key() -> str:
     """Claude API 키 반환."""
     return os.getenv("ANTHROPIC_API_KEY", "")

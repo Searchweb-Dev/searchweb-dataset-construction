@@ -8,6 +8,8 @@ from typing import Optional, Any
 from google import genai
 from google.genai import types
 
+from src.core.config import get_gemini_model
+
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """당신은 웹사이트 분석 전문가입니다.
@@ -32,7 +34,7 @@ class GeminiAnalyzer:
     def __init__(self, api_key: Optional[str] = None):
         """Gemini 클라이언트 초기화."""
         self.client = genai.Client(api_key=api_key)
-        self.model = "gemini-2.0-flash"
+        self.model = get_gemini_model()
 
     def analyze_website(
         self,
