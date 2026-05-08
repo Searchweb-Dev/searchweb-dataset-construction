@@ -83,6 +83,10 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - 로컬 개발: uv 가상환경에서 실행.
 - 도커: pip + requirements.txt 사용 (uv는 로컬 전용).
 
+### 환경변수 규칙
+- `.env`는 **절대 직접 수정 금지**
+- 환경변수 추가·변경 -> `.env.example`만 수정.
+
 ### 절약 규칙
 - **이미 읽은 파일은 다시 확인하지 않는다.**
 - 가능한 도구 호출은 동시에 실행한다.
