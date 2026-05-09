@@ -124,3 +124,8 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - 임시 파일은 작업 완료 즉시 삭제
 - `temp_`, `_new`, `_old`, `_backup` 이름의 파일을 만들지 않는다
 - 작업 중 생성한 디버그용 코드는 PR 전에 삭제
+
+### 코드 내 검색 규칙
+- 심볼 검색(함수·클래스·변수 정의·참조 찾기)은 반드시 serena plugin을 사용한다.
+- `find_symbol`, `find_declaration`, `find_referencing_symbols`, `find_implementations` 등 serena 도구를 우선한다.
+- 단순 텍스트 패턴 매칭은 `search_for_pattern` (serena)을 사용하고, bash grep은 serena로 해결이 안 될 때만 fallback으로 사용한다.
