@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from src.db.models import AISite, AICategory, AITag
 from src.ai.analyzer import get_analyzer
-from src.ai.mcp_tools import render_website_sync
 from src.core.config import get_llm_provider
 
 logger = logging.getLogger(__name__)
@@ -24,32 +23,19 @@ class AIDetector:
     def detect_and_save(self, url: str) -> Optional[dict[str, Any]]:
         """웹사이트를 분석하고 결과를 DB에 저장."""
         try:
-            # 1. 웹사이트 렌더링 및 컨텐츠 추출
-            logger.info(f"웹사이트 렌더링: {url}")
-            render_result = render_website_sync(url)
-
-            if "error" in render_result:
-                logger.error(f"렌더링 실패: {render_result['error']}")
-                return None
-
-            # 2. LLM 분석
+            # 1. LLM 분석 (url_context 방식: Gemini가 직접 fetch)
             logger.info(f"{get_llm_provider()} 분석 시작: {url}")
-            analysis_result = self.analyzer.analyze_website(
-                url=url,
-                page_content=render_result["text_content"],
-                screenshot_base64=render_result.get("screenshot_base64"),
-            )
+            analysis_result = self.analyzer.analyze_website(url=url)
 
-            # 3. 결과 검증
+            # 2. 결과 검증
             if not self._validate_analysis(analysis_result):
                 logger.error(f"분석 결과 검증 실패: {url}")
                 return None
 
-            # 4. DB 저장
+            # 3. DB 저장
             ai_site = self._save_site(
                 url=url,
                 analysis=analysis_result,
-                render_result=render_result,
             )
 
             if ai_site:
@@ -93,7 +79,6 @@ class AIDetector:
         self,
         url: str,
         analysis: dict[str, Any],
-        render_result: dict[str, str],
     ) -> Optional[AISite]:
         """AI 사이트 정보 저장."""
         try:

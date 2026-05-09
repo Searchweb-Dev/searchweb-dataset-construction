@@ -1,10 +1,9 @@
-"""Gemini API를 사용한 웹사이트 분석기."""
+"""Gemini API를 사용한 웹사이트 분석기 (url_context 방식)."""
 
-import base64
 import json
 import logging
 import time
-from typing import Optional, Any
+from typing import Any, Optional
 
 from google import genai
 from google.genai import types
@@ -28,65 +27,9 @@ _SYSTEM_PROMPT = """당신은 웹사이트 분석 전문가입니다.
 
 신중하고 객관적으로 판정하세요."""
 
-
-class GeminiAnalyzer:
-    """Gemini를 사용한 웹사이트 분석기."""
-
-    def __init__(self, api_key: Optional[str] = None):
-        """Gemini 클라이언트 초기화."""
-        self.client = genai.Client(api_key=api_key)
-        self.model = get_gemini_model()
-
-    def analyze_website(
-        self,
-        url: str,
-        page_content: str,
-        screenshot_base64: Optional[str] = None,
-    ) -> dict[str, Any]:
-        """웹사이트를 분석하여 AI 여부 및 분류 판정."""
-        start_time = time.time()
-
-        parts: list[Any] = [self._build_analysis_prompt(url, page_content)]
-
-        if screenshot_base64:
-            image_bytes = (
-                base64.b64decode(screenshot_base64)
-                if isinstance(screenshot_base64, str)
-                else screenshot_base64
-            )
-            parts.append(
-                types.Part.from_bytes(
-                    data=image_bytes,
-                    mime_type="image/png",
-                )
-            )
-
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=parts,
-            config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                max_output_tokens=2048,
-            ),
-        )
-
-        self._check_finish_reason(url, response)
-        result = self._parse_response(response.text)
-
-        elapsed = time.time() - start_time
-        logger.info(f"Gemini 분석 완료: {elapsed:.2f}초")
-
-        return result
-
-    def _build_analysis_prompt(self, url: str, page_content: str) -> str:
-        """분석 프롬프트 생성."""
-        return f"""다음 웹사이트를 분석하고 AI 판별 및 분류 결과를 JSON으로 반환하세요.
+_ANALYSIS_PROMPT = """다음 웹사이트를 분석하고 AI 판별 및 분류 결과를 JSON으로 반환하세요.
 
 URL: {url}
-
-페이지 내용:
-{page_content[:4000]}
 
 다음 정보를 JSON으로 반환하세요:
 1. is_ai_tool (boolean): AI 도구 여부
@@ -104,6 +47,38 @@ URL: {url}
    - originality (1-10): 독창성
 7. confidence (0-1): 판단 신뢰도
 """
+
+
+class GeminiAnalyzer:
+    """Gemini url_context 툴을 사용한 웹사이트 분석기."""
+
+    def __init__(self, api_key: Optional[str] = None):
+        """Gemini 클라이언트 초기화."""
+        self.client = genai.Client(api_key=api_key)
+        self.model = get_gemini_model()
+
+    def analyze_website(self, url: str) -> dict[str, Any]:
+        """url_context 툴로 웹사이트를 직접 fetch하여 AI 여부 및 분류 판정."""
+        start_time = time.time()
+
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=_ANALYSIS_PROMPT.format(url=url),
+            config=types.GenerateContentConfig(
+                system_instruction=_SYSTEM_PROMPT,
+                tools=[types.Tool(url_context=types.UrlContext())],
+                response_mime_type="application/json",
+                max_output_tokens=2048,
+            ),
+        )
+
+        self._check_finish_reason(url, response)
+        result = self._parse_response(response.text)
+
+        elapsed = time.time() - start_time
+        logger.info(f"Gemini 분석 완료: {elapsed:.2f}초")
+
+        return result
 
     def _check_finish_reason(self, url: str, response: Any) -> None:
         """AFC 상한 초과 등 비정상 종료 여부를 로깅."""
