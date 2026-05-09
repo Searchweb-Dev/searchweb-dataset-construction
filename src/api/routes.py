@@ -1,14 +1,17 @@
 """AI 사이트 분석 API 라우트."""
 
+import json
+import os
 from uuid import UUID, uuid4
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from src.db.models import AnalysisJob, AISite
 from src.db.session import SessionLocal
 from src.api.deps import verify_api_key
-from src.schemas import AnalysisJobRequest, AnalysisJobResponse, AISiteResponse
-from src.workers.analyze_task import analyze_website
+from src.schemas import AnalysisJobRequest, AnalysisJobResponse, AISiteResponse, BatchAnalysisRequest, BatchAnalysisResponse
+from src.workers.analyze_task import analyze_website, analyze_ai_tools_batch
 
 router = APIRouter()
 
@@ -77,6 +80,39 @@ def analyze(
         completed_at=job.completed_at,
         retry_count=job.retry_count,
         error_message=job.error_message,
+    )
+
+
+@router.post("/analyze/batch", status_code=202, response_model=BatchAnalysisResponse)
+def analyze_batch(
+    request: BatchAnalysisRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """ai-tools.json 배치 분석 요청.
+
+    limit 미입력 시 전체 대상, 입력 시 해당 개수만 분석한다.
+    분석 완료 후 결과가 타임스탬프 파일 한 개에 저장된다.
+    """
+    json_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "data",
+        "ai-tools.json",
+    )
+    if not os.path.isfile(json_path):
+        raise HTTPException(status_code=500, detail="ai-tools.json 파일을 찾을 수 없습니다.")
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        items = json.load(f)
+
+    total = len(items)
+    target = min(request.limit, total) if request.limit is not None else total
+
+    analyze_ai_tools_batch.delay(request.limit, request.force_reanalyze)
+
+    return BatchAnalysisResponse(
+        total=total,
+        target=target,
+        message=f"{target}건 분석을 백그라운드에서 시작했습니다. 완료 후 data/ 디렉토리에 결과 파일이 생성됩니다.",
     )
 
 
