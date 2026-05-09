@@ -71,6 +71,7 @@ class GeminiAnalyzer:
             ),
         )
 
+        self._check_finish_reason(url, response)
         result = self._parse_response(response.text)
 
         elapsed = time.time() - start_time
@@ -103,6 +104,29 @@ URL: {url}
    - originality (1-10): 독창성
 7. confidence (0-1): 판단 신뢰도
 """
+
+    def _check_finish_reason(self, url: str, response: Any) -> None:
+        """AFC 상한 초과 등 비정상 종료 여부를 로깅."""
+        try:
+            candidate = response.candidates[0] if response.candidates else None
+            if candidate is None:
+                logger.warning(f"[{url}] Gemini 응답에 candidate가 없습니다.")
+                return
+
+            finish_reason = candidate.finish_reason
+            reason_name = finish_reason.name if finish_reason else "UNKNOWN"
+
+            if reason_name == "MAX_TOKENS":
+                logger.warning(
+                    f"[{url}] Gemini 응답이 max_output_tokens 한도에 도달해 잘렸습니다."
+                )
+            elif reason_name not in ("STOP", "FINISH_REASON_UNSPECIFIED"):
+                logger.warning(
+                    f"[{url}] Gemini 비정상 종료: finish_reason={reason_name}. "
+                    "AFC 상한(max remote calls) 초과 또는 기타 중단 가능성이 있습니다."
+                )
+        except Exception as e:
+            logger.debug(f"[{url}] finish_reason 확인 중 오류: {e}")
 
     def _parse_response(self, response_text: str) -> dict[str, Any]:
         """Gemini 응답 파싱."""
