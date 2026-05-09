@@ -6,7 +6,7 @@ from kombu import Exchange, Queue
 
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-app = Celery(__name__)
+app = Celery(__name__, include=["src.workers.analyze_task"])
 app.conf.update(
     broker_url=redis_url,
     result_backend=redis_url,
