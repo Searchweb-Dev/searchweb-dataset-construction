@@ -21,6 +21,17 @@ logger = logging.getLogger(__name__)
 engine = create_engine(get_db_url())
 SessionLocal = sessionmaker(bind=engine)
 
+_FAILURE_SENTINELS = {"Unknown", "분석 실패", ""}
+
+
+def _is_failed_analysis(site: AISite) -> bool:
+    """이전 분석이 실패 기본값인지 확인."""
+    return (
+        (site.title or "") in _FAILURE_SENTINELS
+        or (site.description or "") in _FAILURE_SENTINELS
+        or (site.summary_ko or "") in _FAILURE_SENTINELS
+    )
+
 
 @app.task(bind=True, max_retries=3)
 def analyze_website(self, job_id: str, url: str) -> dict[str, Any]:
@@ -51,17 +62,24 @@ def analyze_website(self, job_id: str, url: str) -> dict[str, Any]:
         # 2. 캐시(기존 분석 결과) 확인
         existing = db.query(AISite).filter(AISite.url == url).first()
         if existing and job.request_source != "force":
-            logger.info(f"캐시에 결과가 있어 결과 파일 쓰기를 건너뜁니다: {url}")
-            job.status = "success"
-            job.completed_at = datetime.utcnow()
-            job.site_id = existing.site_id
-            db.commit()
-            return {
-                "job_id": str(job_id),
-                "status": "success",
-                "site_id": existing.site_id,
-                "is_ai_tool": existing.is_ai_tool,
-            }
+            if _is_failed_analysis(existing):
+                logger.warning(
+                    f"이전 분석이 실패 상태입니다. 재분석합니다: {url} "
+                    f"(title={existing.title!r}, description={existing.description!r}, "
+                    f"summary_ko={existing.summary_ko!r})"
+                )
+            else:
+                logger.info(f"캐시에 결과가 있어 결과 파일 쓰기를 건너뜁니다: {url}")
+                job.status = "success"
+                job.completed_at = datetime.utcnow()
+                job.site_id = existing.site_id
+                db.commit()
+                return {
+                    "job_id": str(job_id),
+                    "status": "success",
+                    "site_id": existing.site_id,
+                    "is_ai_tool": existing.is_ai_tool,
+                }
 
         # 3. AI 판별 실행
         detector = AIDetector(db)
@@ -167,13 +185,20 @@ def analyze_ai_tools_batch(limit: Optional[int], force_reanalyze: bool) -> dict[
 
     try:
         for url in urls:
-            # 기존 분석 결과 스킵
+            # 기존 분석 결과 스킵 (실패 데이터는 재분석)
             if not force_reanalyze:
                 existing = db.query(AISite).filter(AISite.url == url).first()
                 if existing:
-                    skipped += 1
-                    logger.debug(f"분석 스킵 (기존 데이터): {url}")
-                    continue
+                    if _is_failed_analysis(existing):
+                        logger.warning(
+                            f"이전 분석이 실패 상태입니다. 재분석합니다: {url} "
+                            f"(title={existing.title!r}, description={existing.description!r}, "
+                            f"summary_ko={existing.summary_ko!r})"
+                        )
+                    else:
+                        skipped += 1
+                        logger.debug(f"분석 스킵 (기존 데이터): {url}")
+                        continue
 
             # Job 생성
             job = AnalysisJob(
