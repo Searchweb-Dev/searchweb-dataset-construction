@@ -103,11 +103,19 @@ class GeminiAnalyzer:
             logger.debug(f"[{url}] finish_reason 확인 중 오류: {e}")
 
     def _parse_response(self, response_text: str) -> dict[str, Any]:
-        """Gemini 응답 파싱. 마크다운 코드블록도 처리."""
+        """Gemini 응답 파싱. 설명 텍스트 + 마크다운 코드블록 형태도 처리."""
         text = response_text.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+
+        # 코드블록이 텍스트 중간에 있을 경우 추출
+        if "```" in text:
+            start = text.find("```")
+            end = text.rfind("```")
+            if start != end:
+                inner = text[start:end + 3]
+                lines = inner.splitlines()
+                # 첫 줄(```json 등) 제거, 마지막 줄(```) 제거
+                text = "\n".join(lines[1:-1])
+
         try:
             return json.loads(text)
         except json.JSONDecodeError as e:
