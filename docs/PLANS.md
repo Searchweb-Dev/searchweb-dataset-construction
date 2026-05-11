@@ -64,19 +64,14 @@ uv run pytest tests/api/ -v
 
 ## Phase 3: Gemini + MCP 통합 (2주) ✓
 
-### 3.1 Gemini API 클라이언트 ✓
+### 3.1 LLM 프로바이더 팩토리 ✓
+- `src/ai/prompts.py` — 프롬프트 상수 (SYSTEM_PROMPT, ANALYSIS_PROMPT)
 - `src/ai/analyzer.py` — LLM 프로바이더 팩토리 (Gemini 기본 / Claude 선택)
 - `src/ai/gemini_analyzer.py` — Gemini API 호출 로직
   * 분석 프롬프트 생성
   * JSON 모드 응답 파싱
-- MCP (Playwright) 도구 설정
 
-### 3.2 Playwright MCP 서버 ✓
-- `src/ai/mcp_tools.py` — 웹사이트 렌더링 및 스크린샷
-  * 동기/비동기 렌더링
-  * 접근성 트리 추출
-
-### 3.3 분석 로직 ✓
+### 3.2 분석 로직 ✓
 - `src/ai/detector.py` — AI 판별 로직
   * 웹사이트 분석 및 저장
   * 카테고리/태그 저장
@@ -158,14 +153,14 @@ uv run celery -A src.workers.celery_app events
 
 | 항목 | 기술 | 버전 |
 |------|------|------|
-| 웹 프레임워크 | FastAPI | 0.104+ |
+| 웹 프레임워크 | FastAPI | 0.136+ |
 | ORM | SQLAlchemy | 2.0+ |
 | 데이터 검증 | Pydantic | 2.0+ |
 | 데이터베이스 | PostgreSQL | 14+ |
 | 캐시/큐 | Redis | 7+ |
-| 비동기 작업 | Celery | 5.3+ |
-| AI API | Gemini (기본) / Claude (선택) | gemini-2.5-flash-lite |
-| 웹 렌더링 | Playwright (MCP) | - |
+| 비동기 작업 | Celery | 5.6+ |
+| AI API (기본) | Gemini | gemini-2.5-flash-lite |
+| AI API (선택) | Claude | claude-sonnet-4-6 |
 
 ---
 

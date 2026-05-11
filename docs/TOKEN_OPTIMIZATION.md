@@ -41,7 +41,7 @@ async def analyze_with_cache(url: str) -> dict:
 
 **최적화:**
 ```
-Analyze {url}: is_ai_tool, category (level_1, level_2, level_3, tags), scores (utility/trust/originality 1-10), summary (한국어)
+Analyze {url}: is_ai_tool, category (level_1, level_2, level_3, tags), scores (utility/trust/originality 1-10)
 ```
 
 **효과:** 프롬프트 토큰 30~40% 감소

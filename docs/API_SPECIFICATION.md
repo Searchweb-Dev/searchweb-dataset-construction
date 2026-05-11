@@ -53,7 +53,10 @@ Content-Type: application/json
   "url": "https://www.example-ai-tool.com",
   "status": "pending",
   "created_at": "2026-05-04T10:30:00Z",
-  "estimated_wait_seconds": 30
+  "started_at": null,
+  "completed_at": null,
+  "retry_count": 0,
+  "error_message": null
 }
 ```
 
@@ -63,7 +66,10 @@ Content-Type: application/json
 | `url` | string | 분석 대상 URL |
 | `status` | string | 작업 상태 (`pending`, `processing`, `success`, `failed`) |
 | `created_at` | ISO 8601 | 작업 생성 시각 |
-| `estimated_wait_seconds` | integer | 예상 대기 시간 (초) |
+| `started_at` | ISO 8601 \| null | 작업 시작 시각 |
+| `completed_at` | ISO 8601 \| null | 작업 완료 시각 |
+| `retry_count` | integer | 재시도 횟수 |
+| `error_message` | string \| null | 오류 메시지 |
 
 ### Errors
 
@@ -108,9 +114,12 @@ X-API-Key: {api_key}
   "job_id": "550e8400-e29b-41d4-a716-446655440000",
   "url": "https://www.example-ai-tool.com",
   "status": "processing",
-  "progress": 75,
   "created_at": "2026-05-04T10:30:00Z",
-  "started_at": "2026-05-04T10:31:00Z"
+  "started_at": "2026-05-04T10:31:00Z",
+  "completed_at": null,
+  "retry_count": 0,
+  "error_message": null,
+  "result": null
 }
 ```
 
@@ -126,11 +135,14 @@ X-API-Key: {api_key}
   "created_at": "2026-05-04T10:30:00Z",
   "started_at": "2026-05-04T10:31:00Z",
   "completed_at": "2026-05-04T10:35:00Z",
+  "retry_count": 0,
+  "error_message": null,
   "result": {
     "site_id": 42,
+    "url": "https://www.example-ai-tool.com",
     "is_ai_tool": true,
     "title": "Example AI Tool",
-    "description": "An AI-powered service for content generation",
+    "description": "AI 기반 콘텐츠 생성 서비스",
     "categories": [
       {
         "level_1": "text",
@@ -149,7 +161,7 @@ X-API-Key: {api_key}
       "trust": 7,
       "originality": 9
     },
-    "summary_ko": "ChatGPT 기반의 블로그 작성 도구. API 제공, 무료 티어 있음."
+    "last_analyzed_at": "2026-05-04T10:35:00Z"
   }
 }
 ```
@@ -166,8 +178,9 @@ X-API-Key: {api_key}
   "created_at": "2026-05-04T10:30:00Z",
   "started_at": "2026-05-04T10:31:00Z",
   "completed_at": "2026-05-04T10:35:00Z",
-  "error_message": "Failed to render website: Connection timeout",
-  "retry_count": 2
+  "retry_count": 2,
+  "error_message": "분석 실패",
+  "result": null
 }
 ```
 
