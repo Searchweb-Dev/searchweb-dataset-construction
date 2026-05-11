@@ -5,7 +5,7 @@ from typing import Optional, Any
 
 from src.core.config import get_llm_provider, get_gemini_api_key, get_claude_api_key
 from src.ai.gemini_analyzer import GeminiAnalyzer
-from src.ai.prompts import SYSTEM_PROMPT, CLAUDE_ANALYSIS_PROMPT
+from src.ai.prompts import SYSTEM_PROMPT, ANALYSIS_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -26,36 +26,16 @@ def _make_claude_analyzer(api_key: Optional[str]) -> Any:
                 self.model = "claude-sonnet-4-6"
                 self.cache_stats: dict[str, int] = {"hits": 0, "misses": 0}
 
-            def analyze_website(
-                self,
-                url: str,
-                page_content: str,
-                screenshot_base64: Optional[str] = None,
-            ) -> dict[str, Any]:
+            def analyze_website(self, url: str) -> dict[str, Any]:
                 """웹사이트를 분석하여 AI 여부 및 분류 판정."""
                 start_time = time.time()
 
                 messages: list[dict] = [
                     {
                         "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": self._build_analysis_prompt(url, page_content),
-                            }
-                        ],
+                        "content": ANALYSIS_PROMPT.format(url=url),
                     }
                 ]
-
-                if screenshot_base64:
-                    messages[0]["content"].append({
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": screenshot_base64,
-                        },
-                    })
 
                 response = self.client.messages.create(
                     model=self.model,
@@ -83,15 +63,6 @@ def _make_claude_analyzer(api_key: Optional[str]) -> Any:
                 elapsed = time.time() - start_time
                 logger.info(f"Claude 분석 완료: {elapsed:.2f}초")
                 return result
-
-            def _build_analysis_prompt(self, url: str, page_content: str) -> str:
-                return CLAUDE_ANALYSIS_PROMPT.format(
-                    url=url,
-                    page_content=page_content[:4000],
-                )
-
-            def _get_system_prompt(self) -> str:
-                return SYSTEM_PROMPT
 
             def _parse_response(self, response_text: str) -> dict[str, Any]:
                 try:
