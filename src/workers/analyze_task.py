@@ -84,11 +84,7 @@ def analyze_website(self, job_id: str, url: str) -> dict[str, Any]:
         if not result:
             raise Exception("분석 실패")
 
-        # 4. 결과 파일 저장
-        checked_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-        write_batch([(url, result)], checked_at=checked_at)
-
-        # 5. Job 상태 업데이트 (success)
+        # 4. Job 상태 업데이트 (success)
         job.status = "success"
         job.completed_at = datetime.utcnow()
         job.site_id = result.get("site_id")
