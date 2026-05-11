@@ -27,25 +27,27 @@ _SYSTEM_PROMPT = """당신은 웹사이트 분석 전문가입니다.
 
 신중하고 객관적으로 판정하세요."""
 
-_ANALYSIS_PROMPT = """다음 웹사이트를 분석하고 AI 판별 및 분류 결과를 JSON으로 반환하세요.
+_ANALYSIS_PROMPT = """다음 웹사이트를 분석하고 결과를 순수 JSON만 반환하세요. 설명, 마크다운, 코드블록 없이 JSON 객체만 출력하세요.
 
 URL: {url}
 
-다음 정보를 JSON으로 반환하세요:
-1. is_ai_tool (boolean): AI 도구 여부
-2. title (string): 서비스 제목
-3. description (string): 서비스 설명 (한글)
-4. categories (array):
-   - level_1 (string): 대분류
-   - level_2 (string): 중분류
-   - level_3 (string): 소분류
-   - is_primary (boolean): 주요 카테고리 여부
-5. tags (array): 기능별 태그
-6. scores (object):
-   - utility (1-10): 유용성
-   - trust (1-10): 신뢰도
-   - originality (1-10): 독창성
-7. confidence (0-1): 판단 신뢰도
+반환 형식 (이 JSON 구조만 출력):
+{{
+  "is_ai_tool": true,
+  "title": "서비스 제목",
+  "description": "서비스 설명 (한글)",
+  "categories": [
+    {{"level_1": "대분류", "level_2": "중분류", "level_3": "소분류", "is_primary": true}}
+  ],
+  "tags": ["태그1", "태그2"],
+  "scores": {{"utility": 7, "trust": 8, "originality": 6}},
+  "confidence": 0.9
+}}
+
+URL에 접근할 수 없거나 분석이 불가한 경우에도 반드시 위 JSON 형식으로 반환하세요:
+- is_ai_tool: false
+- confidence: 0
+- 나머지 필드: 빈 값
 """
 
 
@@ -103,18 +105,24 @@ class GeminiAnalyzer:
             logger.debug(f"[{url}] finish_reason 확인 중 오류: {e}")
 
     def _parse_response(self, response_text: str) -> dict[str, Any]:
-        """Gemini 응답 파싱. 설명 텍스트 + 마크다운 코드블록 형태도 처리."""
+        """Gemini 응답 파싱. 마크다운 코드블록 및 텍스트 혼합 형태도 처리."""
         text = response_text.strip()
 
-        # 코드블록이 텍스트 중간에 있을 경우 추출
+        # 1. 마크다운 코드블록 추출
         if "```" in text:
             start = text.find("```")
             end = text.rfind("```")
             if start != end:
                 inner = text[start:end + 3]
                 lines = inner.splitlines()
-                # 첫 줄(```json 등) 제거, 마지막 줄(```) 제거
-                text = "\n".join(lines[1:-1])
+                text = "\n".join(lines[1:-1]).strip()
+
+        # 2. 텍스트 중 JSON 객체 부분만 추출 ({...})
+        if not text.startswith("{"):
+            brace_start = text.find("{")
+            brace_end = text.rfind("}")
+            if brace_start != -1 and brace_end != -1 and brace_start < brace_end:
+                text = text[brace_start:brace_end + 1]
 
         try:
             return json.loads(text)
