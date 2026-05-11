@@ -17,7 +17,6 @@ class AISite(BaseModel):
     description = Column(Text, nullable=True)
     favicon_url = Column(String(2048), nullable=True)
     screenshot_url = Column(String(2048), nullable=True)
-    summary_ko = Column(Text, nullable=True)
     score_utility = Column(Integer, nullable=True)
     score_trust = Column(Integer, nullable=True)
     score_originality = Column(Integer, nullable=True)

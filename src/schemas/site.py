@@ -32,7 +32,6 @@ class AISiteResponse(BaseModel):
     is_ai_tool: bool
     title: Optional[str] = None
     description: Optional[str] = None
-    summary_ko: Optional[str] = None
     categories: list[CategoryResponse] = []
     tags: list[str] = []
     scores: ScoreResponse = ScoreResponse()

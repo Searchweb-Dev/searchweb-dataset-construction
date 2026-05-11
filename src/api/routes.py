@@ -148,7 +148,6 @@ def get_job_status(
                 is_ai_tool=site.is_ai_tool,
                 title=site.title,
                 description=site.description,
-                summary_ko=site.summary_ko,
                 categories=[
                     CategoryResponse(
                         level_1=c.level_1,

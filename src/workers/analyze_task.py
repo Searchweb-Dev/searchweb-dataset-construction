@@ -24,7 +24,6 @@ def _is_failed_analysis(site: AISite) -> bool:
     return (
         (site.title or "") in _FAILURE_SENTINELS
         or (site.description or "") in _FAILURE_SENTINELS
-        or (site.summary_ko or "") in _FAILURE_SENTINELS
     )
 
 
@@ -61,8 +60,7 @@ def analyze_website(self, job_id: str, url: str) -> dict[str, Any]:
             if _is_failed_analysis(existing):
                 logger.warning(
                     f"이전 분석이 실패 상태입니다. 재분석합니다: {url} "
-                    f"(title={existing.title!r}, description={existing.description!r}, "
-                    f"summary_ko={existing.summary_ko!r})"
+                    f"(title={existing.title!r}, description={existing.description!r})"
                 )
             else:
                 logger.info(f"캐시에 결과가 있어 결과 파일 쓰기를 건너뜁니다: {url}")
@@ -185,8 +183,7 @@ def analyze_ai_tools_batch(limit: Optional[int], force_reanalyze: bool) -> dict[
                     if _is_failed_analysis(existing):
                         logger.warning(
                             f"이전 분석이 실패 상태입니다. 재분석합니다: {url} "
-                            f"(title={existing.title!r}, description={existing.description!r}, "
-                            f"summary_ko={existing.summary_ko!r})"
+                            f"(title={existing.title!r}, description={existing.description!r})"
                         )
                     else:
                         skipped += 1

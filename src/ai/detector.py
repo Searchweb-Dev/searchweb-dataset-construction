@@ -91,7 +91,6 @@ class AIDetector:
                 existing.is_ai_tool = analysis["is_ai_tool"]
                 existing.title = analysis.get("title", "")
                 existing.description = analysis.get("description", "")
-                existing.summary_ko = analysis.get("description", "")
                 existing.score_utility = analysis.get("scores", {}).get("utility", 0)
                 existing.score_trust = analysis.get("scores", {}).get("trust", 0)
                 existing.score_originality = analysis.get("scores", {}).get("originality", 0)
@@ -105,7 +104,6 @@ class AIDetector:
                 is_ai_tool=analysis["is_ai_tool"],
                 title=analysis.get("title", ""),
                 description=analysis.get("description", ""),
-                summary_ko=analysis.get("description", ""),
                 score_utility=analysis.get("scores", {}).get("utility", 0),
                 score_trust=analysis.get("scores", {}).get("trust", 0),
                 score_originality=analysis.get("scores", {}).get("originality", 0),
