@@ -69,7 +69,6 @@ class GeminiAnalyzer:
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_PROMPT,
                 tools=[types.Tool(url_context=types.UrlContext())],
-                max_output_tokens=2048,
             ),
         )
 
@@ -130,7 +129,23 @@ class GeminiAnalyzer:
             return json.loads(text)
         except json.JSONDecodeError as e:
             logger.error(f"JSON 파싱 실패: {e}\n원본: {response_text[:200]}")
+            recovered = self._recover_truncated_json(text)
+            if recovered:
+                return recovered
             return self._default_response()
+
+    def _recover_truncated_json(self, text: str) -> dict[str, Any] | None:
+        """잘린 JSON을 닫는 괄호를 추가해 복구 시도."""
+        depth_curly = text.count("{") - text.count("}")
+        depth_square = text.count("[") - text.count("]")
+        if depth_curly <= 0 and depth_square <= 0:
+            return None
+        candidate = text.rstrip().rstrip(",")
+        candidate += "]" * depth_square + "}" * depth_curly
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            return None
 
     def _default_response(self) -> dict[str, Any]:
         """기본 응답 구조."""
