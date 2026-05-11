@@ -12,17 +12,14 @@ load_dotenv()
 def get_db_url() -> str:
     """DB URL 반환."""
     env = os.getenv("ENV", "development")
-    
+
     if env == "production":
-        return os.getenv(
-            "DATABASE_URL",
-            "postgresql://user:password@localhost:5432/ai_detector",
-        )
-    
-    return os.getenv(
-        "DATABASE_URL",
-        "sqlite:///./test.db",
-    )
+        url = os.getenv("DATABASE_URL")
+        if not url:
+            raise RuntimeError("프로덕션 환경에서 DATABASE_URL 환경변수가 필요합니다.")
+        return url
+
+    return os.getenv("DATABASE_URL", "sqlite:///./test.db")
 
 
 def get_api_key() -> str:

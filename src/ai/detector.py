@@ -1,7 +1,7 @@
 """AI 웹사이트 판별 및 분석 결과 저장 로직."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Any
 from sqlalchemy.orm import Session
 
@@ -11,6 +11,8 @@ from src.core.config import get_llm_provider
 from src.core.url import normalize_url
 
 logger = logging.getLogger(__name__)
+
+_NOW = lambda: datetime.now(timezone.utc).replace(tzinfo=None)  # naive UTC (DB 컬럼 DateTime(timezone=False) 대응)
 
 
 class AIDetector:
@@ -25,22 +27,17 @@ class AIDetector:
         """웹사이트를 분석하고 결과를 DB에 저장."""
         try:
             url = normalize_url(url)
-            # 1. LLM 분석 (url_context 방식: Gemini가 직접 fetch)
             logger.info(f"{get_llm_provider()} 분석 시작: {url}")
             analysis_result = self.analyzer.analyze_website(url=url)
 
-            # 2. 결과 검증
             if not self._validate_analysis(analysis_result):
                 logger.error(f"분석 결과 검증 실패: {url}")
                 return None
 
-            # 3. DB 저장
-            ai_site = self._save_site(
-                url=url,
-                analysis=analysis_result,
-            )
+            ai_site = self._save_site(url=url, analysis=analysis_result)
 
             if ai_site:
+                # 예외 전파 — 카테고리/태그 저장 실패 시 상위에서 rollback
                 self._save_categories_and_tags(
                     ai_site.site_id,
                     analysis_result["categories"],
@@ -80,45 +77,36 @@ class AIDetector:
 
         return True
 
-    def _save_site(
-        self,
-        url: str,
-        analysis: dict[str, Any],
-    ) -> Optional[AISite]:
+    def _save_site(self, url: str, analysis: dict[str, Any]) -> Optional[AISite]:
         """AI 사이트 정보 저장."""
-        try:
-            # 기존 데이터 확인
-            existing = self.db.query(AISite).filter(AISite.url == url).first()
-            if existing:
-                # 기존 데이터 업데이트
-                existing.is_ai_tool = analysis["is_ai_tool"]
-                existing.title = analysis.get("title", "")
-                existing.description = analysis.get("description", "")
-                existing.score_utility = analysis.get("scores", {}).get("utility", 0)
-                existing.score_trust = analysis.get("scores", {}).get("trust", 0)
-                existing.score_originality = analysis.get("scores", {}).get("originality", 0)
-                existing.last_analyzed_at = datetime.utcnow()
-                self.db.add(existing)
-                return existing
+        scores = analysis.get("scores", {})
+        now = _NOW()
 
-            # 새로운 사이트 추가
-            site = AISite(
-                url=url,
-                is_ai_tool=analysis["is_ai_tool"],
-                title=analysis.get("title", ""),
-                description=analysis.get("description", ""),
-                score_utility=analysis.get("scores", {}).get("utility", 0),
-                score_trust=analysis.get("scores", {}).get("trust", 0),
-                score_originality=analysis.get("scores", {}).get("originality", 0),
-                last_analyzed_at=datetime.utcnow(),
-            )
-            self.db.add(site)
-            self.db.flush()  # ID 생성
-            return site
+        existing = self.db.query(AISite).filter(AISite.url == url).first()
+        if existing:
+            existing.is_ai_tool = analysis["is_ai_tool"]
+            existing.title = analysis.get("title", "")
+            existing.description = analysis.get("description", "")
+            existing.score_utility = scores.get("utility", 0)
+            existing.score_trust = scores.get("trust", 0)
+            existing.score_originality = scores.get("originality", 0)
+            existing.last_analyzed_at = now
+            self.db.add(existing)
+            return existing
 
-        except Exception as e:
-            logger.error(f"사이트 저장 실패: {e}")
-            return None
+        site = AISite(
+            url=url,
+            is_ai_tool=analysis["is_ai_tool"],
+            title=analysis.get("title", ""),
+            description=analysis.get("description", ""),
+            score_utility=scores.get("utility", 0),
+            score_trust=scores.get("trust", 0),
+            score_originality=scores.get("originality", 0),
+            last_analyzed_at=now,
+        )
+        self.db.add(site)
+        self.db.flush()
+        return site
 
     def _save_categories_and_tags(
         self,
@@ -126,23 +114,19 @@ class AIDetector:
         categories: list[dict[str, Any]],
         tags: list[str],
     ) -> None:
-        """카테고리·태그 일괄 삭제 후 재저장 (flush 1회)."""
-        try:
-            self.db.query(AICategory).filter(AICategory.site_id == site_id).delete(synchronize_session=False)
-            self.db.query(AITag).filter(AITag.site_id == site_id).delete(synchronize_session=False)
-            self.db.flush()
+        """카테고리·태그 일괄 삭제 후 재저장 (flush 1회). 예외는 호출자로 전파."""
+        self.db.query(AICategory).filter(AICategory.site_id == site_id).delete(synchronize_session=False)
+        self.db.query(AITag).filter(AITag.site_id == site_id).delete(synchronize_session=False)
+        self.db.flush()
 
-            for cat in categories:
-                self.db.add(AICategory(
-                    site_id=site_id,
-                    level_1=cat.get("level_1", ""),
-                    level_2=cat.get("level_2", ""),
-                    level_3=cat.get("level_3", ""),
-                    is_primary=cat.get("is_primary", False),
-                ))
+        for cat in categories:
+            self.db.add(AICategory(
+                site_id=site_id,
+                level_1=cat.get("level_1", ""),
+                level_2=cat.get("level_2", ""),
+                level_3=cat.get("level_3", ""),
+                is_primary=cat.get("is_primary", False),
+            ))
 
-            for tag_name in tags:
-                self.db.add(AITag(site_id=site_id, tag_name=tag_name))
-
-        except Exception as e:
-            logger.error(f"카테고리/태그 저장 실패: {e}")
+        for tag_name in tags:
+            self.db.add(AITag(site_id=site_id, tag_name=tag_name))
