@@ -124,6 +124,7 @@ class AIDetector:
         try:
             # 세션 캐시를 우회하여 DB에 즉시 DELETE 반영 → autoflush 타이밍 문제 방지
             self.db.query(AICategory).filter(AICategory.site_id == site_id).delete(synchronize_session=False)
+            self.db.flush()
 
             for cat in categories:
                 self.db.add(AICategory(
@@ -142,6 +143,7 @@ class AIDetector:
         try:
             # 세션 캐시를 우회하여 DB에 즉시 DELETE 반영
             self.db.query(AITag).filter(AITag.site_id == site_id).delete(synchronize_session=False)
+            self.db.flush()
 
             for tag_name in tags:
                 self.db.add(AITag(
