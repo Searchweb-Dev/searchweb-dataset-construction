@@ -27,15 +27,15 @@ URL: {url}
   "categories": [
     {{"level_1": "대분류", "level_2": "중분류", "level_3": "소분류", "is_primary": true}}
   ],
-  "tags": ["태그1", "태그2"],
+  "tags": ["태그1", "태그2", "태그3"],
   "scores": {{"utility": 7, "trust": 8, "originality": 6}},
   "confidence": 0.9
 }}
 
 제약:
 - description: 한글 50자 이내
-- categories: 최대 2개
-- tags: 최대 5개
+- categories: 1개
+- tags: 최대 3개
 
 URL에 접근할 수 없거나 분석이 불가한 경우에도 반드시 위 JSON 형식으로 반환하세요:
 - is_ai_tool: false
