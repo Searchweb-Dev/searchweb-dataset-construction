@@ -54,3 +54,25 @@ def get_gemini_model() -> str:
 def get_claude_api_key() -> str:
     """Claude API 키 반환."""
     return os.getenv("ANTHROPIC_API_KEY", "")
+
+
+def get_classifier_mode() -> str:
+    """CLASSIFIER_MODE 환경변수를 읽어 분류기 모드를 반환한다.
+
+    유효값: "llm" | "rule". 기본값은 "llm".
+    유효하지 않은 값이면 경고 로그를 출력하고 "llm"으로 폴백한다.
+
+    Returns:
+        "llm" 또는 "rule" 문자열.
+    """
+    import logging
+    _logger = logging.getLogger(__name__)
+
+    raw = os.getenv("CLASSIFIER_MODE", "llm")
+    normalized = raw.strip().lower()
+    if normalized in ("llm", "rule"):
+        return normalized
+    _logger.warning(
+        "CLASSIFIER_MODE 환경변수 값이 유효하지 않습니다: '%s'. 'llm'으로 폴백합니다.", raw
+    )
+    return "llm"

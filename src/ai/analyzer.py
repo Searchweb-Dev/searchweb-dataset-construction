@@ -1,16 +1,27 @@
-"""LLM 분석기 팩토리. LLM_PROVIDER 환경변수로 백엔드를 선택한다."""
+"""LLM 분석기 팩토리. CLASSIFIER_MODE / LLM_PROVIDER 환경변수로 백엔드를 선택한다."""
 
 import logging
 from typing import Any, Optional
 
-from src.core.config import get_llm_provider, get_gemini_api_key, get_claude_api_key
+from src.core.config import get_classifier_mode, get_llm_provider, get_gemini_api_key, get_claude_api_key
 from src.ai.gemini_analyzer import GeminiAnalyzer
 
 logger = logging.getLogger(__name__)
 
 
 def get_analyzer(api_key: Optional[str] = None) -> Any:
-    """LLM_PROVIDER 환경변수에 따라 적절한 분석기 인스턴스를 반환한다."""
+    """CLASSIFIER_MODE / LLM_PROVIDER 환경변수에 따라 적절한 분석기 인스턴스를 반환한다.
+
+    CLASSIFIER_MODE=rule 이면 RuleAnalyzer를 반환한다.
+    그 외(llm 또는 미설정)이면 LLM_PROVIDER에 따라 LLM 분석기를 반환한다.
+    """
+    classifier_mode = get_classifier_mode()
+
+    if classifier_mode == "rule":
+        from src.rule.analyzer import RuleAnalyzer
+        logger.info("분류기 모드: rule (규칙기반 파이프라인)")
+        return RuleAnalyzer()
+
     provider = get_llm_provider()
 
     if provider == "claude":
@@ -22,9 +33,9 @@ def get_analyzer(api_key: Optional[str] = None) -> Any:
                 "`uv add anthropic`으로 설치하세요."
             )
         key = api_key or get_claude_api_key()
-        logger.info("LLM 프로바이더: Claude")
+        logger.info("분류기 모드: llm, LLM 프로바이더: Claude")
         return ClaudeAnalyzer(api_key=key)
 
     key = api_key or get_gemini_api_key()
-    logger.info("LLM 프로바이더: Gemini")
+    logger.info("분류기 모드: llm, LLM 프로바이더: Gemini")
     return GeminiAnalyzer(api_key=key)
