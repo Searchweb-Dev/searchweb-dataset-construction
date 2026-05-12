@@ -43,6 +43,7 @@ class GeminiAnalyzer:
         elapsed = time.time() - start_time
         logger.info(f"Gemini 분석 완료: {elapsed:.2f}초")
 
+        result["analyzer"] = "gemini"
         return result
 
     def _check_finish_reason(self, url: str, response: Any) -> None:

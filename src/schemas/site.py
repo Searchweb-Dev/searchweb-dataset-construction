@@ -35,6 +35,7 @@ class AISiteResponse(BaseModel):
     categories: list[CategoryResponse] = []
     tags: list[str] = []
     scores: ScoreResponse = ScoreResponse()
+    analyzer: Optional[str] = None
     last_analyzed_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}

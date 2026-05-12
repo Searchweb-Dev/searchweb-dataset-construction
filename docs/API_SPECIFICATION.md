@@ -161,10 +161,26 @@ X-API-Key: {api_key}
       "trust": 7,
       "originality": 9
     },
+    "analyzer": "gemini",
     "last_analyzed_at": "2026-05-04T10:35:00Z"
   }
 }
 ```
+
+**result 객체 필드:**
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `site_id` | integer | 사이트 ID |
+| `url` | string | 분석 대상 URL |
+| `is_ai_tool` | boolean | AI 도구 여부 |
+| `title` | string \| null | 사이트 제목 |
+| `description` | string \| null | 사이트 설명 |
+| `categories` | array | 카테고리 분류 목록 |
+| `tags` | array | 기능 태그 목록 |
+| `scores` | object | 점수 (`utility`, `trust`, `originality`, 각 1-10) |
+| `analyzer` | string \| null | 분석에 사용된 도구 (`gemini`, `claude` 등) |
+| `last_analyzed_at` | ISO 8601 \| null | 마지막 분석 시각 |
 
 ### Response (실패)
 

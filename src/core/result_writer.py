@@ -63,6 +63,7 @@ def _to_entry(url: str, analysis: dict[str, Any], checked_at: str) -> dict[str, 
         "tags": analysis.get("tags", []),
         "scores": analysis.get("scores", {}),
         "confidence": analysis.get("confidence", 0),
+        "analyzer": analysis.get("analyzer"),
         "checked_at": checked_at,
     }
 

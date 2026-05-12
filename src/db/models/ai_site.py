@@ -20,4 +20,5 @@ class AISite(BaseModel):
     score_utility = Column(Integer, nullable=True)
     score_trust = Column(Integer, nullable=True)
     score_originality = Column(Integer, nullable=True)
+    analyzer = Column(String(50), nullable=True)
     last_analyzed_at = Column(DateTime, nullable=True, index=True)

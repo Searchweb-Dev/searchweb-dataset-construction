@@ -51,6 +51,7 @@ def _make_claude_analyzer(api_key: Optional[str]) -> Any:
                 )
 
                 result = self._parse_response(response.content[0].text)
+                result["analyzer"] = "claude"
 
                 usage = response.usage
                 if hasattr(usage, "cache_read_input_tokens") and usage.cache_read_input_tokens:
