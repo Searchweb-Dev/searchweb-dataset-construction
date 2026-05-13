@@ -23,8 +23,8 @@ app.add_middleware(
 )
 
 app.include_router(analyze_routes.router, prefix="/api/v1/analyze", tags=["analyze"])
-app.include_router(job_routes.router, prefix="/api/v1/jobs", tags=["jobs"])
 app.include_router(rule_routes.router, prefix="/api/v1/rule", tags=["rule"])
+app.include_router(job_routes.router, prefix="/api/v1/jobs", tags=["jobs"])
 
 
 @app.on_event("startup")
