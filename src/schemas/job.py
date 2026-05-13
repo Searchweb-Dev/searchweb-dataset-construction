@@ -31,20 +31,16 @@ class AnalysisJobResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class BatchAnalysisRequest(BaseModel):
-    """배치 분석 요청 스키마."""
-
-    urls: list[HttpUrl] = Field(
-        min_length=1,
-        max_length=500,
-        description="분석할 URL 목록 (최대 500개)",
-    )
-    force_reanalyze: bool = False
-
-
 class BatchAnalysisResponse(BaseModel):
     """배치 분석 응답 스키마."""
 
     total: int = Field(description="요청된 전체 URL 수")
     accepted: int = Field(description="분석 대상으로 접수된 URL 수")
     message: str = Field(description="배치 작업 접수 안내")
+
+
+class BatchFilePathRequest(BaseModel):
+    """서버 경로 배치 분석 요청 스키마."""
+
+    file_path: str = Field(description="서버 내 분석 대상 파일 경로 (JSON 또는 텍스트)")
+    force_reanalyze: bool = False

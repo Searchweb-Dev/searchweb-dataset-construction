@@ -115,15 +115,22 @@ curl -X POST http://localhost:8000/api/v1/analyze \
 
 응답: `{"job_id": "uuid", "status": "pending", ...}`
 
-### 비동기 일괄 분석 요청
+### 비동기 일괄 분석 — 파일 업로드
 ```bash
-curl -X POST http://localhost:8000/api/v1/analyze/batch \
-  -H "Content-Type: application/json" \
+curl -X POST http://localhost:8000/api/v1/analyze/batch/upload \
   -H "x-api-key: your-api-key" \
-  -d '{"urls": ["https://example1.com", "https://example2.com"], "force_reanalyze": false}'
+  -F "file=@urls.json"
 ```
 
-응답: `{"total": 2, "accepted": 2, "message": "2건 분석을 백그라운드에서 시작했습니다..."}`
+### 비동기 일괄 분석 — 서버 경로
+```bash
+curl -X POST http://localhost:8000/api/v1/analyze/batch/file \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"file_path": "data/ai-tools.json"}'
+```
+
+응답: `{"total": 150, "accepted": 150, "message": "150건 분석을 백그라운드에서 시작했습니다..."}`
 
 ### 작업 상태 조회
 ```bash

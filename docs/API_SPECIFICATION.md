@@ -89,13 +89,17 @@ Content-Type: application/json
 
 ---
 
-## 2. 비동기 일괄 분석 요청
+## 2. 비동기 일괄 분석 — 파일 업로드
 
-URL 목록을 직접 전달하여 일괄 비동기 분석합니다. 최대 500개까지 한 번에 요청 가능합니다.
+파일을 직접 업로드하여 URL 목록을 추출하고 일괄 비동기 분석합니다.
+
+**지원 형식:**
+- JSON: 문자열 배열 `["url1", ...]` 또는 객체 배열 `[{"link": "url1"}, ...]`
+- 텍스트: 한 줄에 URL 하나
 
 ### Endpoint
 ```
-POST /analyze/batch
+POST /analyze/batch/upload
 ```
 
 ### Request
@@ -103,23 +107,14 @@ POST /analyze/batch
 **Header:**
 ```
 X-API-Key: {api_key}
-Content-Type: application/json
+Content-Type: multipart/form-data
 ```
 
-**Body:**
-```json
-{
-  "urls": [
-    "https://www.example1.com",
-    "https://www.example2.com"
-  ],
-  "force_reanalyze": false
-}
-```
+**Form:**
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| `urls` | array | ✓ | 분석할 URL 목록 (1~500개) |
+| `file` | file | ✓ | URL 목록 파일 (JSON 또는 텍스트, 최대 500개) |
 | `force_reanalyze` | boolean | - | 기존 분석 결과 무시하고 재분석 (기본: false) |
 
 ### Response
@@ -136,22 +131,84 @@ Content-Type: application/json
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `total` | integer | 요청된 전체 URL 수 |
+| `total` | integer | 파일에서 추출된 전체 URL 수 |
 | `accepted` | integer | 분석 대상으로 접수된 URL 수 |
 | `message` | string | 배치 작업 접수 안내 |
 
 ### Errors
 
-**Status: 422 Unprocessable Entity**
+**Status: 400 Bad Request**
 ```json
 {
-  "detail": "urls 필드는 필수이며 1개 이상이어야 합니다."
+  "detail": "파일에서 유효한 URL을 찾을 수 없습니다."
 }
 ```
 
 ---
 
-## 3. 규칙기반 동기 분류
+## 3. 비동기 일괄 분석 — 서버 경로
+
+서버에 이미 존재하는 파일 경로를 지정하여 일괄 비동기 분석합니다.
+
+**지원 형식:** JSON, 텍스트 (위와 동일)
+
+### Endpoint
+```
+POST /analyze/batch/file
+```
+
+### Request
+
+**Header:**
+```
+X-API-Key: {api_key}
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "file_path": "data/ai-tools.json",
+  "force_reanalyze": false
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `file_path` | string | ✓ | 서버 내 파일 경로 |
+| `force_reanalyze` | boolean | - | 기존 분석 결과 무시하고 재분석 (기본: false) |
+
+### Response
+
+**Status: 202 Accepted**
+
+```json
+{
+  "total": 150,
+  "accepted": 150,
+  "message": "150건 분석을 백그라운드에서 시작했습니다. 완료 후 data/ 디렉토리에 결과 파일이 생성됩니다."
+}
+```
+
+### Errors
+
+**Status: 404 Not Found**
+```json
+{
+  "detail": "파일을 찾을 수 없습니다: data/not-found.json"
+}
+```
+
+**Status: 400 Bad Request**
+```json
+{
+  "detail": "파일에서 유효한 URL을 찾을 수 없습니다."
+}
+```
+
+---
+
+## 4. 규칙기반 동기 분류
 
 규칙기반 파이프라인으로 단일 URL을 동기적으로 분류하고 결과를 데이터베이스에 저장합니다. Celery 없이 즉시 결과를 반환하므로 실시간 분류가 필요한 경우에 활용합니다.
 
@@ -267,7 +324,7 @@ Content-Type: application/json
 
 ---
 
-## 4. 분석 상태 조회
+## 5. 분석 상태 조회
 
 작업 ID로 분석 진행 상황 및 결과를 조회합니다.
 
@@ -439,12 +496,20 @@ curl -X POST http://localhost:8000/api/v1/analyze \
   -d '{"url": "https://www.example-ai-tool.com"}'
 ```
 
-#### 비동기 일괄 분석 요청
+#### 비동기 일괄 분석 — 파일 업로드
 ```bash
-curl -X POST http://localhost:8000/api/v1/analyze/batch \
+curl -X POST http://localhost:8000/api/v1/analyze/batch/upload \
+  -H "X-API-Key: your-api-key" \
+  -F "file=@urls.json" \
+  -F "force_reanalyze=false"
+```
+
+#### 비동기 일괄 분석 — 서버 경로
+```bash
+curl -X POST http://localhost:8000/api/v1/analyze/batch/file \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
-  -d '{"urls": ["https://www.example1.com", "https://www.example2.com"], "force_reanalyze": false}'
+  -d '{"file_path": "data/ai-tools.json", "force_reanalyze": false}'
 ```
 
 #### 상태 조회
@@ -486,7 +551,24 @@ response = requests.get(
 print(response.json())
 ```
 
-#### 비동기 일괄 분석 요청
+#### 비동기 일괄 분석 — 파일 업로드
+```python
+import requests
+
+api_key = "your-api-key"
+headers = {"X-API-Key": api_key}
+
+with open("urls.json", "rb") as f:
+    response = requests.post(
+        "http://localhost:8000/api/v1/analyze/batch/upload",
+        headers=headers,
+        files={"file": ("urls.json", f, "application/json")},
+        data={"force_reanalyze": "false"},
+    )
+print(response.json())
+```
+
+#### 비동기 일괄 분석 — 서버 경로
 ```python
 import requests
 
@@ -494,12 +576,9 @@ api_key = "your-api-key"
 headers = {"X-API-Key": api_key}
 
 response = requests.post(
-    "http://localhost:8000/api/v1/analyze/batch",
+    "http://localhost:8000/api/v1/analyze/batch/file",
     headers=headers,
-    json={
-        "urls": ["https://www.example1.com", "https://www.example2.com"],
-        "force_reanalyze": False,
-    }
+    json={"file_path": "data/ai-tools.json", "force_reanalyze": False},
 )
 print(response.json())
 ```

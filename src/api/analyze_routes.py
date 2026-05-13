@@ -1,11 +1,13 @@
 """비동기 URL 분석 요청 API 라우트."""
 
+import logging
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from src.api.deps import verify_api_key
+from src.core.batch_file import extract_urls_from_bytes, extract_urls_from_path
 from src.core.enums import JobStatus
 from src.core.url import normalize_url
 from src.db.models import AISite, AnalysisJob
@@ -13,10 +15,12 @@ from src.db.session import get_db
 from src.schemas import (
     AnalysisJobRequest,
     AnalysisJobResponse,
-    BatchAnalysisRequest,
     BatchAnalysisResponse,
+    BatchFilePathRequest,
 )
 from src.workers.analyze_task import analyze_ai_tools_batch, analyze_website
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -95,24 +99,75 @@ def analyze(
     )
 
 
-@router.post("/batch", status_code=202, response_model=BatchAnalysisResponse)
-def analyze_batch(
-    request: BatchAnalysisRequest,
+@router.post("/batch/upload", status_code=202, response_model=BatchAnalysisResponse)
+async def analyze_batch_upload(
+    file: UploadFile = File(..., description="URL 목록 파일 (JSON 또는 텍스트, 최대 500개)"),
+    force_reanalyze: bool = Form(False),
     api_key: str = Depends(verify_api_key),
 ):
-    """URL 목록을 일괄 비동기 분석한다.
+    """업로드된 파일에서 URL을 추출해 일괄 비동기 분석한다.
 
-    이미 분석된 URL은 기본적으로 건너뛰며, force_reanalyze=true이면 전체 재분석한다.
-    분석 완료 후 결과가 data/ 디렉토리에 타임스탬프 파일 한 개로 저장된다.
+    JSON 파일: 문자열 배열 ["url1", ...] 또는 객체 배열 [{"link": "url1"}, ...] 지원.
+    텍스트 파일: 한 줄에 URL 하나.
+    최대 500개까지 처리하며 초과분은 잘라냅니다.
 
     Args:
-        request: 분석할 URL 목록(최대 500개)과 재분석 강제 여부.
+        file: 업로드할 URL 목록 파일.
+        force_reanalyze: 기존 분석 결과 무시 여부.
         api_key: API 키 검증 의존성.
 
     Returns:
         전체 URL 수, 접수된 URL 수, 작업 접수 안내 메시지.
+
+    Raises:
+        HTTPException 400: 파일에서 URL을 추출할 수 없는 경우.
     """
-    urls = [str(u) for u in request.urls]
+    content = await file.read()
+    try:
+        urls = extract_urls_from_bytes(content, filename=file.filename or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logger.info("[batch/upload] %d개 URL 접수 (파일: %s)", len(urls), file.filename)
+    analyze_ai_tools_batch.delay(urls, force_reanalyze)
+
+    return BatchAnalysisResponse(
+        total=len(urls),
+        accepted=len(urls),
+        message=f"{len(urls)}건 분석을 백그라운드에서 시작했습니다. 완료 후 data/ 디렉토리에 결과 파일이 생성됩니다.",
+    )
+
+
+@router.post("/batch/file", status_code=202, response_model=BatchAnalysisResponse)
+def analyze_batch_file(
+    request: BatchFilePathRequest,
+    api_key: str = Depends(verify_api_key),
+):
+    """서버 경로의 파일에서 URL을 추출해 일괄 비동기 분석한다.
+
+    JSON 파일: 문자열 배열 ["url1", ...] 또는 객체 배열 [{"link": "url1"}, ...] 지원.
+    텍스트 파일: 한 줄에 URL 하나.
+    최대 500개까지 처리하며 초과분은 잘라냅니다.
+
+    Args:
+        request: 서버 내 파일 경로와 재분석 강제 여부.
+        api_key: API 키 검증 의존성.
+
+    Returns:
+        전체 URL 수, 접수된 URL 수, 작업 접수 안내 메시지.
+
+    Raises:
+        HTTPException 404: 지정한 경로에 파일이 없는 경우.
+        HTTPException 400: 파일에서 URL을 추출할 수 없는 경우.
+    """
+    try:
+        urls = extract_urls_from_path(request.file_path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    logger.info("[batch/file] %d개 URL 접수 (경로: %s)", len(urls), request.file_path)
     analyze_ai_tools_batch.delay(urls, request.force_reanalyze)
 
     return BatchAnalysisResponse(
