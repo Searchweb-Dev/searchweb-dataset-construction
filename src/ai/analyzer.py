@@ -22,6 +22,14 @@ def get_analyzer(api_key: Optional[str] = None) -> Any:
         logger.info("분류기 모드: rule (규칙기반 파이프라인)")
         return RuleAnalyzer()
 
+    return get_llm_analyzer(api_key)
+
+
+def get_llm_analyzer(api_key: Optional[str] = None) -> Any:
+    """CLASSIFIER_MODE 무관하게 LLM_PROVIDER에 따른 LLM 분석기를 반환한다.
+
+    /analyze Celery task처럼 항상 LLM 분석이 필요한 경우에 사용한다.
+    """
     provider = get_llm_provider()
 
     if provider == "claude":

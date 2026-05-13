@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 from src.db.models import AnalysisJob, AISite
 from src.db.session import SessionLocal
+from src.ai.analyzer import get_llm_analyzer
 from src.ai.detector import AIDetector
 from src.workers.celery_app import app
 from src.core.result_writer import write_batch
@@ -72,6 +73,9 @@ def analyze_website(self, job_id: str, url: str) -> dict[str, Any]:
                     f"이전 분석이 실패 상태입니다. 재분석합니다: {url} "
                     f"(title={existing.title!r}, description={existing.description!r})"
                 )
+            elif existing.analyzer == "rule":
+                # rule 분류 결과는 LLM으로 재분석해 upsert
+                logger.info(f"rule 분류 결과를 LLM으로 재분석합니다: {url}")
             else:
                 logger.info(f"캐시에 결과가 있어 결과 파일 쓰기를 건너뜁니다: {url}")
                 job.status = JobStatus.SUCCESS
@@ -85,7 +89,8 @@ def analyze_website(self, job_id: str, url: str) -> dict[str, Any]:
                     "is_ai_tool": existing.is_ai_tool,
                 }
 
-        detector = AIDetector(db)
+        # CLASSIFIER_MODE 무관하게 항상 LLM으로 분석
+        detector = AIDetector(db, analyzer=get_llm_analyzer())
         result = detector.detect_and_save(url)
 
         if not result:
@@ -144,7 +149,7 @@ def _analyze_one(url: str, job_id: UUID) -> tuple[str, UUID, dict[str, Any] | No
     """
     db = SessionLocal()
     try:
-        detector = AIDetector(db)
+        detector = AIDetector(db, analyzer=get_llm_analyzer())
         result = detector.detect_and_save(url)
         if not result:
             return url, job_id, None, "분석 실패"

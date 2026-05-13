@@ -52,7 +52,8 @@ def analyze(
 
     if not request.force_reanalyze:
         existing = db.query(AISite).filter(AISite.url == url).first()
-        if existing:
+        # rule로 분석된 사이트는 LLM으로 재분석이 필요하므로 캐시 히트로 보지 않는다
+        if existing and existing.analyzer != "rule":
             job = (
                 db.query(AnalysisJob)
                 .filter(
