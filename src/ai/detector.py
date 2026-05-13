@@ -16,10 +16,15 @@ logger = logging.getLogger(__name__)
 class AIDetector:
     """웹사이트 AI 판별 및 분석."""
 
-    def __init__(self, db: Session):
-        """AI 판별기 초기화."""
+    def __init__(self, db: Session, analyzer: Any = None):
+        """AI 판별기 초기화.
+
+        Args:
+            db: DB 세션.
+            analyzer: 분석기 인스턴스. None이면 get_analyzer()로 자동 선택한다.
+        """
         self.db = db
-        self.analyzer = get_analyzer()
+        self.analyzer = analyzer if analyzer is not None else get_analyzer()
 
     def detect_and_save(self, url: str) -> Optional[dict[str, Any]]:
         """웹사이트를 분석하고 결과를 DB에 저장."""

@@ -81,6 +81,9 @@ pycparser==3.0 ; python_full_version >= '3.10' and implementation_name != 'PyPy'
 # playwright==1.59.0
 # pyee==13.0.1
 
+# ── HTML Parsing ───────────────────────────────────────────
+beautifulsoup4==4.14.3
+
 # ── Utilities ──────────────────────────────────────────────────
 python-dotenv==1.2.1 ; python_full_version < '3.10'
 python-dotenv==1.2.2 ; python_full_version >= '3.10'

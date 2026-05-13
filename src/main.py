@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.db.models.base import Base
 from src.db.session import engine
 from src.api import routes
+from src.api import rule_routes
 from src.core.config import get_allowed_origins
 
 app = FastAPI(
@@ -23,6 +24,7 @@ app.add_middleware(
 )
 
 app.include_router(routes.router, prefix="/api/v1")
+app.include_router(rule_routes.router, prefix="/api/v1/rule", tags=["rule"])
 
 
 @app.on_event("startup")

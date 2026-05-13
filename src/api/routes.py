@@ -24,7 +24,23 @@ def analyze(
     api_key: str = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ):
-    """분석 요청 (비동기 작업 생성)."""
+    """단일 URL을 비동기로 분석하는 작업을 생성한다.
+
+    이미 분석된 URL이 있으면 기존 성공 job을 즉시 반환한다.
+    force_reanalyze=true이면 기존 결과를 무시하고 새 작업을 생성한다.
+    작업 결과는 GET /jobs/{job_id}로 폴링해 확인한다.
+
+    Args:
+        request: 분석할 URL과 재분석 강제 여부.
+        api_key: API 키 검증 의존성.
+        db: DB 세션 의존성.
+
+    Returns:
+        생성된 분석 작업 정보 (status=pending 또는 기존 success job).
+
+    Raises:
+        HTTPException 422: URL 형식 오류.
+    """
     url = normalize_url(str(request.url))
 
     # 기존 분석 결과 확인 (재분석 강제 아님)
@@ -81,10 +97,22 @@ def analyze_batch(
     request: BatchAnalysisRequest,
     api_key: str = Depends(verify_api_key),
 ):
-    """ai-tools.json 배치 분석 요청.
+    """data/ai-tools.json의 URL 목록을 일괄 비동기 분석한다.
 
-    limit 미입력 시 전체 대상, 입력 시 해당 개수만 분석한다.
-    분석 완료 후 결과가 타임스탬프 파일 한 개에 저장된다.
+    limit 미입력 시 전체 항목을, 입력 시 해당 개수만 분석한다.
+    이미 분석된 URL은 기본적으로 건너뛰며, force_reanalyze=true이면 전체 재분석한다.
+    분석 완료 후 결과가 data/ 디렉토리에 타임스탬프 파일 한 개로 저장된다.
+
+    Args:
+        request: 분석 항목 수 제한(limit)과 재분석 강제 여부.
+        api_key: API 키 검증 의존성.
+
+    Returns:
+        전체 항목 수, 분석 대상 수, 작업 접수 안내 메시지.
+
+    Raises:
+        HTTPException 500: ai-tools.json 파일을 찾을 수 없는 경우.
+        HTTPException 422: 요청 파라미터 형식 오류.
     """
     json_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
@@ -115,7 +143,23 @@ def get_job_status(
     api_key: str = Depends(verify_api_key),
     db: Session = Depends(get_db),
 ):
-    """분석 작업 상태 조회."""
+    """분석 작업의 현재 상태와 결과를 조회한다.
+
+    작업이 완료(status=success)된 경우 분석 결과(AISite 정보)를 함께 반환한다.
+    완료 전이면 result 필드는 null이다.
+
+    Args:
+        job_id: 조회할 작업의 UUID 문자열.
+        api_key: API 키 검증 의존성.
+        db: DB 세션 의존성.
+
+    Returns:
+        작업 상태 및 완료 시 분석 결과(site 정보, 카테고리, 태그, 점수).
+
+    Raises:
+        HTTPException 400: job_id가 유효한 UUID 형식이 아닌 경우.
+        HTTPException 404: 해당 job_id의 작업이 존재하지 않는 경우.
+    """
     try:
         job_uuid = UUID(job_id)
     except ValueError:
