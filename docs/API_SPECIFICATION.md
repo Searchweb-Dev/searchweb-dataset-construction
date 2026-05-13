@@ -13,7 +13,7 @@ Spring Backend와 통신하는 AI 사이트 분석 Worker의 REST API.
 
 ---
 
-## 1. 비동기 분석 요청
+## 1. 비동기 단일 분석 요청
 
 URL을 전송하여 비동기 분석 작업을 시작합니다.
 
@@ -89,7 +89,66 @@ Content-Type: application/json
 
 ---
 
-## 2. 규칙기반 동기 분류
+## 2. 비동기 일괄 분석 요청
+
+`data/ai-tools.json`의 URL 목록을 일괄 비동기 분석합니다.
+
+### Endpoint
+```
+POST /analyze/batch
+```
+
+### Request
+
+**Header:**
+```
+X-API-Key: {api_key}
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "limit": 10,
+  "force_reanalyze": false
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `limit` | integer | - | 분석할 항목 수 (미입력 시 전체 대상) |
+| `force_reanalyze` | boolean | - | 기존 분석 결과 무시하고 재분석 (기본: false) |
+
+### Response
+
+**Status: 202 Accepted**
+
+```json
+{
+  "total": 150,
+  "target": 10,
+  "message": "10건 분석을 백그라운드에서 시작했습니다. 완료 후 data/ 디렉토리에 결과 파일이 생성됩니다."
+}
+```
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `total` | integer | ai-tools.json 전체 항목 수 |
+| `target` | integer | 이번 요청의 분석 대상 수 (limit 적용 후) |
+| `message` | string | 배치 작업 접수 안내 |
+
+### Errors
+
+**Status: 500 Internal Server Error**
+```json
+{
+  "detail": "ai-tools.json 파일을 찾을 수 없습니다."
+}
+```
+
+---
+
+## 3. 규칙기반 동기 분류
 
 규칙기반 파이프라인으로 단일 URL을 동기적으로 분류하고 결과를 데이터베이스에 저장합니다. Celery 없이 즉시 결과를 반환하므로 실시간 분류가 필요한 경우에 활용합니다.
 
@@ -205,7 +264,7 @@ Content-Type: application/json
 
 ---
 
-## 3. 분석 상태 조회
+## 4. 분석 상태 조회
 
 작업 ID로 분석 진행 상황 및 결과를 조회합니다.
 
@@ -318,6 +377,13 @@ X-API-Key: {api_key}
 
 ### Errors
 
+**Status: 400 Bad Request**
+```json
+{
+  "detail": "Invalid job_id format"
+}
+```
+
 **Status: 404 Not Found**
 ```json
 {
@@ -350,7 +416,9 @@ X-API-Key: {api_key}
 
 | 오류 | HTTP 상태 | 설명 |
 |------|----------|------|
-| Invalid URL | 400 | URL 형식 오류 |
+| Invalid URL | 400/422 | URL 형식 오류 |
+| Invalid API Key | 403 | 잘못된 API 키 |
+| Not Found | 404 | 리소스 미존재 |
 | Rate Limited | 429 | 요청 한도 초과 |
 | Server Error | 500 | 내부 서버 오류 |
 
@@ -360,12 +428,20 @@ X-API-Key: {api_key}
 
 ### cURL
 
-#### 비동기 분석 요청
+#### 비동기 단일 분석 요청
 ```bash
 curl -X POST http://localhost:8000/api/v1/analyze \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://www.example-ai-tool.com"}'
+```
+
+#### 비동기 일괄 분석 요청
+```bash
+curl -X POST http://localhost:8000/api/v1/analyze/batch \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 10, "force_reanalyze": false}'
 ```
 
 #### 상태 조회
@@ -384,7 +460,7 @@ curl -X POST http://localhost:8000/api/v1/rule/classify \
 
 ### Python (requests)
 
-#### 비동기 분석 요청
+#### 비동기 단일 분석 요청
 ```python
 import requests
 
@@ -403,6 +479,21 @@ job_id = response.json()["job_id"]
 response = requests.get(
     f"http://localhost:8000/api/v1/jobs/{job_id}",
     headers=headers
+)
+print(response.json())
+```
+
+#### 비동기 일괄 분석 요청
+```python
+import requests
+
+api_key = "your-api-key"
+headers = {"X-API-Key": api_key}
+
+response = requests.post(
+    "http://localhost:8000/api/v1/analyze/batch",
+    headers=headers,
+    json={"limit": 50, "force_reanalyze": False}
 )
 print(response.json())
 ```

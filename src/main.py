@@ -3,16 +3,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api import analyze_routes, job_routes, rule_routes
+from src.core.config import get_allowed_origins
 from src.db.models.base import Base
 from src.db.session import engine
-from src.api import routes
-from src.api import rule_routes
-from src.core.config import get_allowed_origins
 
 app = FastAPI(
     title="AI Site Detection Worker",
     version="0.1.0",
-    description="Claude + MCP 기반 AI 웹사이트 판별 Worker"
+    description="Claude + MCP 기반 AI 웹사이트 판별 Worker",
 )
 
 app.add_middleware(
@@ -23,7 +22,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(routes.router, prefix="/api/v1")
+app.include_router(analyze_routes.router, prefix="/api/v1/analyze", tags=["analyze"])
+app.include_router(job_routes.router, prefix="/api/v1/jobs", tags=["jobs"])
 app.include_router(rule_routes.router, prefix="/api/v1/rule", tags=["rule"])
 
 
@@ -33,7 +33,7 @@ async def startup() -> None:
     Base.metadata.create_all(bind=engine)
 
 
-@app.get("/health")
+@app.get("/health", tags=["health"])
 def health_check():
     """헬스 체크."""
     return {"status": "ok"}

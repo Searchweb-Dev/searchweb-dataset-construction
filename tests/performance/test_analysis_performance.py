@@ -11,7 +11,7 @@ class TestAnalysisPerformance:
     @pytest.fixture(autouse=True)
     def mock_celery(self):
         """Celery 작업 Mock."""
-        with patch("src.api.routes.analyze_website") as mock_task:
+        with patch("src.api.analyze_routes.analyze_website") as mock_task:
             mock_task.delay = MagicMock(return_value=Mock(id="mock-task-id"))
             yield mock_task
 
@@ -72,7 +72,7 @@ class TestConcurrentAnalysis:
     @pytest.fixture(autouse=True)
     def mock_celery(self):
         """Celery 작업 Mock."""
-        with patch("src.api.routes.analyze_website") as mock_task:
+        with patch("src.api.analyze_routes.analyze_website") as mock_task:
             mock_task.delay = MagicMock(return_value=Mock(id="mock-task-id"))
             yield mock_task
 
@@ -169,7 +169,7 @@ class TestCodeQuality:
 
     def test_no_debug_code(self):
         """디버그 코드 미포함 확인."""
-        import src.api.routes as routes_module
+        import src.api.analyze_routes as routes_module
         import src.ai.analyzer as analyzer_module
         
         source_files = [routes_module, analyzer_module]

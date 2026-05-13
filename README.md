@@ -105,7 +105,7 @@ docker-compose down
 
 ## API 사용 예시
 
-### 비동기 분석 요청
+### 비동기 단일 분석 요청
 ```bash
 curl -X POST http://localhost:8000/api/v1/analyze \
   -H "Content-Type: application/json" \
@@ -115,6 +115,16 @@ curl -X POST http://localhost:8000/api/v1/analyze \
 
 응답: `{"job_id": "uuid", "status": "pending", ...}`
 
+### 비동기 일괄 분석 요청
+```bash
+curl -X POST http://localhost:8000/api/v1/analyze/batch \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{"limit": 10, "force_reanalyze": false}'
+```
+
+응답: `{"total": 150, "target": 10, "message": "10건 분석을 백그라운드에서 시작했습니다..."}`
+
 ### 작업 상태 조회
 ```bash
 curl http://localhost:8000/api/v1/jobs/{job_id} \
@@ -123,7 +133,7 @@ curl http://localhost:8000/api/v1/jobs/{job_id} \
 
 응답: `{"status": "success", "result": {...}, ...}`
 
-### 규칙기반 동기 분류 (Phase 8)
+### 규칙기반 동기 분류
 ```bash
 curl -X POST http://localhost:8000/api/v1/rule/classify \
   -H "Content-Type: application/json" \
@@ -233,6 +243,10 @@ sw-test/
 ├── src/                     # 프로덕션 코드
 │   ├── main.py              # FastAPI 진입점
 │   ├── api/                 # REST API 엔드포인트
+│   │   ├── analyze_routes.py        # POST /analyze, POST /analyze/batch
+│   │   ├── job_routes.py            # GET /jobs/{job_id}
+│   │   ├── rule_routes.py           # POST /rule/classify
+│   │   └── deps.py                  # API Key 인증 의존성
 │   ├── ai/                  # LLM 분석기 (Gemini / Claude)
 │   │   ├── prompts.py               # 프롬프트 상수 (SYSTEM_PROMPT, ANALYSIS_PROMPT)
 │   │   ├── analyzer.py              # LLM 프로바이더 팩토리
