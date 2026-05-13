@@ -91,7 +91,7 @@ Content-Type: application/json
 
 ## 2. 비동기 일괄 분석 요청
 
-`data/ai-tools.json`의 URL 목록을 일괄 비동기 분석합니다.
+URL 목록을 직접 전달하여 일괄 비동기 분석합니다. 최대 500개까지 한 번에 요청 가능합니다.
 
 ### Endpoint
 ```
@@ -109,14 +109,17 @@ Content-Type: application/json
 **Body:**
 ```json
 {
-  "limit": 10,
+  "urls": [
+    "https://www.example1.com",
+    "https://www.example2.com"
+  ],
   "force_reanalyze": false
 }
 ```
 
 | 필드 | 타입 | 필수 | 설명 |
 |------|------|------|------|
-| `limit` | integer | - | 분석할 항목 수 (미입력 시 전체 대상) |
+| `urls` | array | ✓ | 분석할 URL 목록 (1~500개) |
 | `force_reanalyze` | boolean | - | 기존 분석 결과 무시하고 재분석 (기본: false) |
 
 ### Response
@@ -125,24 +128,24 @@ Content-Type: application/json
 
 ```json
 {
-  "total": 150,
-  "target": 10,
-  "message": "10건 분석을 백그라운드에서 시작했습니다. 완료 후 data/ 디렉토리에 결과 파일이 생성됩니다."
+  "total": 2,
+  "accepted": 2,
+  "message": "2건 분석을 백그라운드에서 시작했습니다. 완료 후 data/ 디렉토리에 결과 파일이 생성됩니다."
 }
 ```
 
 | 필드 | 타입 | 설명 |
 |------|------|------|
-| `total` | integer | ai-tools.json 전체 항목 수 |
-| `target` | integer | 이번 요청의 분석 대상 수 (limit 적용 후) |
+| `total` | integer | 요청된 전체 URL 수 |
+| `accepted` | integer | 분석 대상으로 접수된 URL 수 |
 | `message` | string | 배치 작업 접수 안내 |
 
 ### Errors
 
-**Status: 500 Internal Server Error**
+**Status: 422 Unprocessable Entity**
 ```json
 {
-  "detail": "ai-tools.json 파일을 찾을 수 없습니다."
+  "detail": "urls 필드는 필수이며 1개 이상이어야 합니다."
 }
 ```
 
@@ -441,7 +444,7 @@ curl -X POST http://localhost:8000/api/v1/analyze \
 curl -X POST http://localhost:8000/api/v1/analyze/batch \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
-  -d '{"limit": 10, "force_reanalyze": false}'
+  -d '{"urls": ["https://www.example1.com", "https://www.example2.com"], "force_reanalyze": false}'
 ```
 
 #### 상태 조회
@@ -493,7 +496,10 @@ headers = {"X-API-Key": api_key}
 response = requests.post(
     "http://localhost:8000/api/v1/analyze/batch",
     headers=headers,
-    json={"limit": 50, "force_reanalyze": False}
+    json={
+        "urls": ["https://www.example1.com", "https://www.example2.com"],
+        "force_reanalyze": False,
+    }
 )
 print(response.json())
 ```

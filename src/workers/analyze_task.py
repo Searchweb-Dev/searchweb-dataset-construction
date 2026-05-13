@@ -1,6 +1,5 @@
 """웹사이트 AI 판별 비동기 작업."""
 
-import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -134,24 +133,6 @@ def analyze_website(self, job_id: str, url: str) -> dict[str, Any]:
         db.close()
 
 
-def _load_ai_tools_urls(limit: Optional[int] = None) -> list[str]:
-    """ai-tools.json에서 URL 목록을 읽는다. limit 미지정 시 전체 반환."""
-    json_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "data",
-        "ai-tools.json",
-    )
-    if not os.path.isfile(json_path):
-        logger.error(f"ai-tools.json 파일 없음: {json_path}")
-        return []
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        items = json.load(f)
-
-    urls = [item["link"] for item in items if isinstance(item, dict) and item.get("link")]
-    if limit is not None:
-        urls = urls[:limit]
-    return urls
 
 
 def _analyze_one(url: str, job_id: UUID) -> tuple[str, UUID, dict[str, Any] | None, str | None]:
@@ -203,22 +184,21 @@ def _update_job_statuses(
 
 
 @app.task(autoretry_for=(), max_retries=0, time_limit=3600, soft_time_limit=3300)
-def analyze_ai_tools_batch(limit: Optional[int], force_reanalyze: bool) -> dict[str, Any]:
+def analyze_ai_tools_batch(urls: list[str], force_reanalyze: bool) -> dict[str, Any]:
     """
-    ai-tools.json 전체(또는 일부)를 병렬 분석하고 결과를 파일 한 개에 저장한다.
+    URL 목록을 병렬 분석하고 결과를 파일 한 개에 저장한다.
 
     LLM API 호출은 ThreadPoolExecutor로 병렬 실행되고,
     DB 쓰기는 각 워커의 독립 세션에서 처리된다.
     모든 URL 처리가 끝난 뒤 write_batch()를 한 번만 호출한다.
 
     Args:
-        limit: 분석할 최대 항목 수. None이면 전체.
+        urls: 분석할 URL 문자열 목록.
         force_reanalyze: True면 이미 분석된 URL도 재분석.
 
     Returns:
         analyzed/skipped/failed/output_path 정보 딕셔너리
     """
-    urls = _load_ai_tools_urls(limit)
     if not urls:
         return {"analyzed": 0, "skipped": 0, "failed": 0, "output_path": None}
 

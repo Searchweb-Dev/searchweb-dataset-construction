@@ -32,19 +32,19 @@ class AnalysisJobResponse(BaseModel):
 
 
 class BatchAnalysisRequest(BaseModel):
-    """ai-tools.json 배치 분석 요청 스키마."""
+    """배치 분석 요청 스키마."""
 
-    limit: Optional[int] = Field(
-        default=None,
-        gt=0,
-        description="분석할 항목 수. 미입력 시 전체 대상.",
+    urls: list[HttpUrl] = Field(
+        min_length=1,
+        max_length=500,
+        description="분석할 URL 목록 (최대 500개)",
     )
     force_reanalyze: bool = False
 
 
 class BatchAnalysisResponse(BaseModel):
-    """ai-tools.json 배치 분석 응답 스키마."""
+    """배치 분석 응답 스키마."""
 
-    total: int = Field(description="ai-tools.json 전체 항목 수")
-    target: int = Field(description="이번 요청의 분석 대상 수 (limit 적용 후)")
+    total: int = Field(description="요청된 전체 URL 수")
+    accepted: int = Field(description="분석 대상으로 접수된 URL 수")
     message: str = Field(description="배치 작업 접수 안내")

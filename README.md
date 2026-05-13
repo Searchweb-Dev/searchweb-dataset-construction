@@ -120,10 +120,10 @@ curl -X POST http://localhost:8000/api/v1/analyze \
 curl -X POST http://localhost:8000/api/v1/analyze/batch \
   -H "Content-Type: application/json" \
   -H "x-api-key: your-api-key" \
-  -d '{"limit": 10, "force_reanalyze": false}'
+  -d '{"urls": ["https://example1.com", "https://example2.com"], "force_reanalyze": false}'
 ```
 
-응답: `{"total": 150, "target": 10, "message": "10건 분석을 백그라운드에서 시작했습니다..."}`
+응답: `{"total": 2, "accepted": 2, "message": "2건 분석을 백그라운드에서 시작했습니다..."}`
 
 ### 작업 상태 조회
 ```bash

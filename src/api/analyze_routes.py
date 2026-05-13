@@ -1,15 +1,14 @@
 """비동기 URL 분석 요청 API 라우트."""
 
-import json
-import os
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from src.api.deps import verify_api_key
 from src.core.enums import JobStatus
 from src.core.url import normalize_url
-from src.db.models import AICategory, AISite, AITag, AnalysisJob
+from src.db.models import AISite, AnalysisJob
 from src.db.session import get_db
 from src.schemas import (
     AnalysisJobRequest,
@@ -18,7 +17,6 @@ from src.schemas import (
     BatchAnalysisResponse,
 )
 from src.workers.analyze_task import analyze_ai_tools_batch, analyze_website
-from uuid import uuid4
 
 router = APIRouter()
 
@@ -102,40 +100,23 @@ def analyze_batch(
     request: BatchAnalysisRequest,
     api_key: str = Depends(verify_api_key),
 ):
-    """data/ai-tools.json의 URL 목록을 일괄 비동기 분석한다.
+    """URL 목록을 일괄 비동기 분석한다.
 
-    limit 미입력 시 전체 항목을, 입력 시 해당 개수만 분석한다.
     이미 분석된 URL은 기본적으로 건너뛰며, force_reanalyze=true이면 전체 재분석한다.
     분석 완료 후 결과가 data/ 디렉토리에 타임스탬프 파일 한 개로 저장된다.
 
     Args:
-        request: 분석 항목 수 제한(limit)과 재분석 강제 여부.
+        request: 분석할 URL 목록(최대 500개)과 재분석 강제 여부.
         api_key: API 키 검증 의존성.
 
     Returns:
-        전체 항목 수, 분석 대상 수, 작업 접수 안내 메시지.
-
-    Raises:
-        HTTPException 500: ai-tools.json 파일을 찾을 수 없는 경우.
+        전체 URL 수, 접수된 URL 수, 작업 접수 안내 메시지.
     """
-    json_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "data",
-        "ai-tools.json",
-    )
-    if not os.path.isfile(json_path):
-        raise HTTPException(status_code=500, detail="ai-tools.json 파일을 찾을 수 없습니다.")
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        items = json.load(f)
-
-    total = len(items)
-    target = min(request.limit, total) if request.limit is not None else total
-
-    analyze_ai_tools_batch.delay(request.limit, request.force_reanalyze)
+    urls = [str(u) for u in request.urls]
+    analyze_ai_tools_batch.delay(urls, request.force_reanalyze)
 
     return BatchAnalysisResponse(
-        total=total,
-        target=target,
-        message=f"{target}건 분석을 백그라운드에서 시작했습니다. 완료 후 data/ 디렉토리에 결과 파일이 생성됩니다.",
+        total=len(urls),
+        accepted=len(urls),
+        message=f"{len(urls)}건 분석을 백그라운드에서 시작했습니다. 완료 후 data/ 디렉토리에 결과 파일이 생성됩니다.",
     )
