@@ -50,16 +50,20 @@ def analyze(
     Raises:
         HTTPException 422: URL 형식 오류.
     """
+    input_urls = [normalize_url(str(u)) for u in request.urls]
+    logger.info(
+        "[analyze] 요청 수신: %d개 URL %s (force_reanalyze=%s)",
+        len(input_urls), input_urls, request.force_reanalyze,
+    )
+
     responses: list[AnalysisJobResponse] = []
     pending_job_ids: list[str] = []
     pending_urls: list[str] = []
 
-    for raw_url in request.urls:
-        url = normalize_url(str(raw_url))
-
+    for url in input_urls:
         if not request.force_reanalyze:
             existing = db.query(AISite).filter(AISite.url == url).first()
-            # LLM으로 분석된 URL만 캐시 히트 — rule 분류 결과는 LLM으로 재분류
+            # LLM으로 분석된 URL만 캐시 히트 — rule 분석 결과는 LLM으로 재분석
             if existing and existing.analyzer not in (None, "rule"):
                 job = (
                     db.query(AnalysisJob)
@@ -71,6 +75,7 @@ def analyze(
                     .first()
                 )
                 if job:
+                    logger.info("[analyze] 캐시 히트 (analyzer=%s): %s", existing.analyzer, url)
                     responses.append(AnalysisJobResponse(
                         job_id=job.job_id,
                         url=job.url,
@@ -82,6 +87,8 @@ def analyze(
                         error_message=job.error_message,
                     ))
                     continue
+            if existing and existing.analyzer in (None, "rule"):
+                logger.info("[analyze] rule 분석 결과 → LLM 재분석 대상: %s", url)
 
         job = AnalysisJob(
             job_id=uuid4(),
@@ -107,10 +114,16 @@ def analyze(
 
     db.commit()
 
-    # LLM 분류 대상 URL 전체를 단일 task로 묶어 디스패치 — LLM 호출 최소화
     if pending_urls:
+        logger.info("[analyze] LLM 배치 분석 디스패치: %d개 URL %s", len(pending_urls), pending_urls)
         analyze_website_batch.delay(pending_job_ids, pending_urls)
+    else:
+        logger.info("[analyze] 모든 URL 캐시 히트 — LLM 호출 없음")
 
+    logger.info(
+        "[analyze] 응답 반환: 캐시=%d건 LLM대기=%d건",
+        len(responses) - len(pending_urls), len(pending_urls),
+    )
     return responses
 
 

@@ -70,6 +70,7 @@ class GeminiAnalyzer:
 
     def analyze_website(self, url: str) -> dict[str, Any]:
         """단건 URL 분석."""
+        logger.info("[Gemini] 단건 분析 시작: %s", url)
         start_time = time.time()
         response = self._generate_single(url)
         self._check_finish_reason(url, response)
@@ -78,17 +79,20 @@ class GeminiAnalyzer:
         result["analyzer"] = "gemini"
 
         elapsed = time.time() - start_time
-        logger.info(f"Gemini 단건 분석 완료: {elapsed:.2f}초")
+        logger.info(
+            "[Gemini] 단건 분析 완료: %s | is_ai_tool=%s confidence=%.2f (%.2f초)",
+            url, result.get("is_ai_tool"), result.get("confidence", 0), elapsed,
+        )
         return result
 
     def analyze_websites_batch(self, urls: list[str]) -> list[dict[str, Any]]:
-        """URL 목록을 LLM 호출 1회로 배치 분석한다.
+        """URL 목록을 LLM 호출 1회로 배치 분析한다.
 
         Args:
-            urls: 분석할 URL 목록 (1~5개).
+            urls: 분析할 URL 목록 (1~5개).
 
         Returns:
-            입력 순서와 동일한 순서의 분석 결과 리스트.
+            입력 순서와 동일한 순서의 분析 결과 리스트.
             개별 URL 파싱 실패 시 해당 항목을 기본값으로 채운다.
         """
         if not urls:
@@ -96,6 +100,7 @@ class GeminiAnalyzer:
         if len(urls) == 1:
             return [self.analyze_website(urls[0])]
 
+        logger.info("[Gemini] 배치 분析 시작: %d개 URL %s", len(urls), urls)
         start_time = time.time()
         url_list = "\n".join(f"{i+1}. {url}" for i, url in enumerate(urls))
         prompt = BATCH_ANALYSIS_PROMPT.format(url_list=url_list)
@@ -106,7 +111,12 @@ class GeminiAnalyzer:
         results = self._parse_batch(response, urls)
 
         elapsed = time.time() - start_time
-        logger.info(f"Gemini 배치 분석 완료: {len(urls)}개 URL, {elapsed:.2f}초")
+        logger.info("[Gemini] 배치 분析 완료: %d개 URL (%.2f초)", len(urls), elapsed)
+        for url, result in zip(urls, results):
+            logger.info(
+                "[Gemini]   └ %s | is_ai_tool=%s confidence=%.2f title=%r",
+                url, result.get("is_ai_tool"), result.get("confidence", 0), result.get("title", ""),
+            )
         return results
 
     @retry(
@@ -116,7 +126,7 @@ class GeminiAnalyzer:
         reraise=True,
     )
     def _generate_single(self, url: str) -> Any:
-        """단건 분석 — 503/429 시 지수 백오프 재시도."""
+        """단건 分析 — 503/429 시 지수 백오프 재시도."""
         return self.client.models.generate_content(
             model=self.model,
             contents=ANALYSIS_PROMPT.format(url=url),
@@ -135,7 +145,7 @@ class GeminiAnalyzer:
         reraise=True,
     )
     def _generate_batch(self, prompt: str) -> Any:
-        """배치 분석 — 503/429 시 지수 백오프 재시도."""
+        """배치 分析 — 503/429 시 지수 백오프 재시도."""
         return self.client.models.generate_content(
             model=self.model,
             contents=prompt,
@@ -186,23 +196,23 @@ class GeminiAnalyzer:
         try:
             candidate = response.candidates[0] if response.candidates else None
             if candidate is None:
-                logger.warning(f"[{url}] Gemini 응답에 candidate가 없습니다.")
+                logger.warning("[%s] Gemini 응답에 candidate가 없습니다.", url)
                 return
             finish_reason = candidate.finish_reason
             reason_name = finish_reason.name if finish_reason else "UNKNOWN"
             if reason_name == "MAX_TOKENS":
-                logger.warning(f"[{url}] 응답이 max_output_tokens 한도에 도달해 잘렸습니다.")
+                logger.warning("[%s] 응답이 max_output_tokens 한도에 도달해 잘렸습니다.", url)
             elif reason_name not in ("STOP", "FINISH_REASON_UNSPECIFIED"):
-                logger.warning(f"[{url}] 비정상 종료: finish_reason={reason_name}")
+                logger.warning("[%s] 비정상 종료: finish_reason=%s", url, reason_name)
         except Exception as e:
-            logger.debug(f"[{url}] finish_reason 확인 중 오류: {e}")
+            logger.debug("[%s] finish_reason 확인 중 오류: %s", url, e)
 
     def _default_response(self) -> dict[str, Any]:
         """파싱 실패 시 기본 응답 구조."""
         return {
             "is_ai_tool": False,
             "title": "Unknown",
-            "description": "분석 실패",
+            "description": "분析 실패",
             "categories": [],
             "tags": [],
             "scores": {"utility": 0, "trust": 0, "originality": 0},
