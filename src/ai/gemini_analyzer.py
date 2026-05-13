@@ -7,11 +7,18 @@ from typing import Any, Optional
 
 from google import genai
 from google.genai import types
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from src.core.config import get_gemini_model
 from src.ai.prompts import SYSTEM_PROMPT, ANALYSIS_PROMPT
 
 logger = logging.getLogger(__name__)
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """503 / 429 계열 오류인지 판별한다."""
+    msg = str(exc)
+    return "503" in msg or "429" in msg or "UNAVAILABLE" in msg or "RESOURCE_EXHAUSTED" in msg
 
 
 class GeminiAnalyzer:
@@ -26,14 +33,7 @@ class GeminiAnalyzer:
         """url_context 툴로 웹사이트를 직접 fetch하여 AI 여부 및 분류 판정."""
         start_time = time.time()
 
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=ANALYSIS_PROMPT.format(url=url),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                tools=[types.Tool(url_context=types.UrlContext())],
-            ),
-        )
+        response = self._generate_with_retry(url)
 
         self._check_finish_reason(url, response)
         if not response.text:
@@ -45,6 +45,23 @@ class GeminiAnalyzer:
 
         result["analyzer"] = "gemini"
         return result
+
+    @retry(
+        retry=retry_if_exception(_is_retryable),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(4),
+        reraise=True,
+    )
+    def _generate_with_retry(self, url: str) -> Any:
+        """503/429 오류 시 지수 백오프로 최대 4회 재시도한다."""
+        return self.client.models.generate_content(
+            model=self.model,
+            contents=ANALYSIS_PROMPT.format(url=url),
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                tools=[types.Tool(url_context=types.UrlContext())],
+            ),
+        )
 
     def _check_finish_reason(self, url: str, response: Any) -> None:
         """AFC 상한 초과 등 비정상 종료 여부를 로깅."""
