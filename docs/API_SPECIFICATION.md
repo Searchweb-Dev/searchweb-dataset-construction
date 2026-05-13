@@ -13,7 +13,7 @@ Spring Backend와 통신하는 AI 사이트 분석 Worker의 REST API.
 
 ---
 
-## 1. 분석 요청
+## 1. 비동기 분석 요청
 
 URL을 전송하여 비동기 분석 작업을 시작합니다.
 
@@ -89,7 +89,123 @@ Content-Type: application/json
 
 ---
 
-## 2. 분석 상태 조회
+## 2. 규칙기반 동기 분류
+
+규칙기반 파이프라인으로 단일 URL을 동기적으로 분류하고 결과를 데이터베이스에 저장합니다. Celery 없이 즉시 결과를 반환하므로 실시간 분류가 필요한 경우에 활용합니다.
+
+### Endpoint
+```
+POST /rule/classify
+```
+
+### Request
+
+**Header:**
+```
+X-API-Key: {api_key}
+Content-Type: application/json
+```
+
+**Body:**
+```json
+{
+  "url": "https://www.example-ai-tool.com"
+}
+```
+
+| 필드 | 타입 | 필수 | 설명 |
+|------|------|------|------|
+| `url` | string | ✓ | 분류할 웹사이트 URL |
+
+### Response
+
+**Status: 200 OK**
+
+```json
+{
+  "site_id": 42,
+  "input_url": "https://www.example-ai-tool.com",
+  "normalized_url": "https://example-ai-tool.com",
+  "predicted_status": "ai",
+  "final_status": "ai",
+  "passed_count": 6,
+  "hard_pass": true,
+  "total_score": 85.5,
+  "score_breakdown": {
+    "content_ai_markers": 25.0,
+    "api_availability": 10.0,
+    "social_proof": 15.0,
+    "business_model": 20.0,
+    "technical_indicators": 15.5
+  },
+  "review_required": false,
+  "review_reasons": [],
+  "criteria": [
+    {
+      "criterion": "AI Markers",
+      "passed": true,
+      "confidence": 0.95
+    },
+    {
+      "criterion": "API Availability",
+      "passed": true,
+      "confidence": 0.87
+    }
+  ],
+  "summary": "Strong AI service indicators. Passed 6/8 critical criteria.",
+  "extracted": {
+    "title": "Example AI Tool",
+    "description": "AI-powered content generation platform",
+    "features": ["API", "Free tier", "Multilingual"]
+  }
+}
+```
+
+**응답 객체 필드:**
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `site_id` | integer | 저장된 사이트 ID |
+| `input_url` | string | 입력받은 원본 URL |
+| `normalized_url` | string | 정규화된 URL |
+| `predicted_status` | string | 예측 분류 결과 (`ai`, `not-ai`, `uncertain`) |
+| `final_status` | string | 최종 분류 결과 |
+| `passed_count` | integer | 통과한 기준의 개수 |
+| `hard_pass` | boolean | 하드 패스 여부 (강한 신호 감지) |
+| `total_score` | float | 종합 점수 (0-100) |
+| `score_breakdown` | object | 세부 점수 항목별 분석 |
+| `review_required` | boolean | 수동 검토 필요 여부 |
+| `review_reasons` | array | 검토가 필요한 사유 목록 |
+| `criteria` | array | 각 기준별 평가 결과 |
+| `summary` | string | 분류 결과의 한 문장 요약 |
+| `extracted` | object | 추출된 메타데이터 (제목, 설명, 기능 등) |
+
+### Errors
+
+**Status: 422 Unprocessable Entity**
+```json
+{
+  "detail": "Invalid URL format"
+}
+```
+
+**Status: 403 Forbidden**
+```json
+{
+  "detail": "Invalid API key"
+}
+```
+
+**Status: 500 Internal Server Error**
+```json
+{
+  "detail": "Classification pipeline failed or database save failed"
+}
+```
+
+---
+
+## 3. 분석 상태 조회
 
 작업 ID로 분석 진행 상황 및 결과를 조회합니다.
 
@@ -211,7 +327,7 @@ X-API-Key: {api_key}
 
 ---
 
-## 상태 값
+## 비동기 분석 상태 값
 
 | 상태 | 설명 |
 |------|------|
@@ -243,19 +359,32 @@ X-API-Key: {api_key}
 ## 예제
 
 ### cURL
+
+#### 비동기 분석 요청
 ```bash
-# 분석 요청
 curl -X POST http://localhost:8000/api/v1/analyze \
   -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://www.example-ai-tool.com"}'
+```
 
-# 상태 조회
+#### 상태 조회
+```bash
 curl -X GET http://localhost:8000/api/v1/jobs/{job_id} \
   -H "X-API-Key: your-api-key"
 ```
 
+#### 규칙기반 동기 분류
+```bash
+curl -X POST http://localhost:8000/api/v1/rule/classify \
+  -H "X-API-Key: your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.example-ai-tool.com"}'
+```
+
 ### Python (requests)
+
+#### 비동기 분석 요청
 ```python
 import requests
 
@@ -276,4 +405,23 @@ response = requests.get(
     headers=headers
 )
 print(response.json())
+```
+
+#### 규칙기반 동기 분류
+```python
+import requests
+
+api_key = "your-api-key"
+headers = {"X-API-Key": api_key}
+
+# 동기 분류 요청
+response = requests.post(
+    "http://localhost:8000/api/v1/rule/classify",
+    headers=headers,
+    json={"url": "https://www.example-ai-tool.com"}
+)
+result = response.json()
+print(f"Site ID: {result['site_id']}")
+print(f"Predicted Status: {result['predicted_status']}")
+print(f"Total Score: {result['total_score']}")
 ```
