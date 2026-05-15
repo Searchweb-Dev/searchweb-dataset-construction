@@ -50,6 +50,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./data:/app/data
+      - ./alembic:/app/alembic
 
   worker:
     build:

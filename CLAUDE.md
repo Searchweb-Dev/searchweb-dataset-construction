@@ -94,6 +94,13 @@ Read:
 ### 3.3. Execution
 - Local: `uv`
 - Docker: `pip + requirements.txt`
+- `alembic/` 마이그레이션 파일 수정 후 도커 재적용 시 반드시 이미지 재빌드 필요:
+  ```bash
+  docker compose down -v
+  docker compose build --no-cache api
+  docker compose up -d postgres redis
+  docker compose run --rm api alembic upgrade head
+  ```
 
 ### 3.4. Code
 - Use type hints
