@@ -45,13 +45,13 @@ def analyze_urls_batch(self, job_ids: list[str], urls: list[str]) -> dict[str, A
     """URL 목록을 ThreadPoolExecutor로 병렬 단건 분석한다.
 
     Args:
-        job_ids: 분析 작업 ID 목록 (urls와 동일 순서).
-        urls: 분析 대상 URL 목록 (최대 5개).
+        job_ids: 분석 작업 ID 목록 (urls와 동일 순서).
+        urls: 분석 대상 URL 목록 (최대 5개).
 
     Returns:
         성공/실패 건수 요약 딕셔너리.
     """
-    logger.info("배치 분析 task 시작: %d개 URL %s", len(urls), urls)
+    logger.info("배치 분석 task 시작: %d개 URL %s", len(urls), urls)
     db = SessionLocal()
     now = utc_now()
 
@@ -82,7 +82,7 @@ def analyze_urls_batch(self, job_ids: list[str], urls: list[str]) -> dict[str, A
         for future in as_completed(futures):
             url, job_id, result, error = future.result()
             if error:
-                logger.error("배치 항목 분析 실패: %s (%s)", url, error)
+                logger.error("배치 항목 분석 실패: %s (%s)", url, error)
                 failure_map[job_id] = error
             else:
                 success_map[job_id] = result.get("site_id") if result else None
@@ -102,14 +102,14 @@ def analyze_urls_batch(self, job_ids: list[str], urls: list[str]) -> dict[str, A
 @app.task(bind=True, max_retries=3, autoretry_for=(), time_limit=300, soft_time_limit=240)
 def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
     """
-    웹사이트 분析 작업 (단건).
+    웹사이트 분석 작업 (단건).
 
     Args:
-        job_id: 分析 작업 ID (UUID)
-        url: 分析 대상 URL
+        job_id: 분석 작업 ID (UUID)
+        url: 분석 대상 URL
 
     Returns:
-        분析 결과 딕셔너리
+        분석 결과 딕셔너리
     """
     url = normalize_url(url)
     db = SessionLocal()
@@ -129,12 +129,12 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
         if existing and job.request_source != "force":
             if _is_failed_analysis(existing):
                 logger.warning(
-                    f"이전 분析이 실패 상태입니다. 재분析합니다: {url} "
+                    f"이전 분석이 실패 상태입니다. 재분석합니다: {url} "
                     f"(title={existing.title!r}, description={existing.description!r})"
                 )
             elif existing.analyzer == "rule":
-                # rule 분류 결과는 LLM으로 재분析해 upsert
-                logger.info(f"rule 분류 결과를 LLM으로 재분析합니다: {url}")
+                # rule 분류 결과는 LLM으로 재분석해 upsert
+                logger.info(f"rule 분류 결과를 LLM으로 재분석합니다: {url}")
             else:
                 logger.info(f"캐시에 결과가 있어 결과 파일 쓰기를 건너뜁니다: {url}")
                 job.status = JobStatus.SUCCESS
@@ -148,18 +148,18 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
                     "is_ai_tool": existing.is_ai_tool,
                 }
 
-        # CLASSIFIER_MODE 무관하게 항상 LLM으로 분析
+        # CLASSIFIER_MODE 무관하게 항상 LLM으로 분석
         detector = AIDetector(db, analyzer=get_llm_analyzer())
         result = detector.detect_and_save(url)
 
         if not result:
-            raise AnalysisError("분析 실패")
+            raise AnalysisError("분석 실패")
 
         job.status = JobStatus.SUCCESS
         job.completed_at = utc_now()
         job.site_id = result.get("site_id")
         db.commit()
-        logger.info(f"분析 완료: {job_id} -> {result}")
+        logger.info(f"분석 완료: {job_id} -> {result}")
 
         return {
             "job_id": str(job_id),
@@ -169,7 +169,7 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error(f"분析 작업 실패: {e}")
+        logger.error(f"분석 작업 실패: {e}")
         db.rollback()
         db.expire_all()  # rollback 후 stale 객체 제거
 
@@ -199,7 +199,7 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
 
 def _analyze_one(url: str, job_id: UUID) -> tuple[str, UUID, dict[str, Any] | None, str | None]:
     """
-    URL 하나를 독립 DB 세션으로 분析한다. ThreadPoolExecutor 워커에서 호출된다.
+    URL 하나를 독립 DB 세션으로 분석한다. ThreadPoolExecutor 워커에서 호출된다.
 
     Returns:
         (url, job_id, result_or_None, error_or_None)
@@ -209,7 +209,7 @@ def _analyze_one(url: str, job_id: UUID) -> tuple[str, UUID, dict[str, Any] | No
         detector = AIDetector(db, analyzer=get_llm_analyzer())
         result = detector.detect_and_save(url)
         if not result:
-            return url, job_id, None, "분析 실패"
+            return url, job_id, None, "분석 실패"
         return url, job_id, result, None
     except Exception as e:
         return url, job_id, None, str(e)
@@ -221,7 +221,7 @@ def _update_job_statuses(
     success_map: dict[UUID, int | None],
     failure_map: dict[UUID, str],
 ) -> None:
-    """병렬 분析 완료 후 Job 상태를 세션 하나로 일괄 업데이트한다."""
+    """병렬 분석 완료 후 Job 상태를 세션 하나로 일괄 업데이트한다."""
     db = SessionLocal()
     try:
         all_ids = list(success_map) + list(failure_map)
@@ -248,15 +248,15 @@ def _update_job_statuses(
 @app.task(autoretry_for=(), max_retries=0, time_limit=3600, soft_time_limit=3300)
 def analyze_urls_bulk(urls: list[str], force_reanalyze: bool) -> dict[str, Any]:
     """
-    URL 목록을 병렬 分析하고 결과를 파일 한 개에 저장한다.
+    URL 목록을 병렬 분석하고 결과를 파일 한 개에 저장한다.
 
     LLM API 호출은 ThreadPoolExecutor로 병렬 실행되고,
     DB 쓰기는 각 워커의 독립 세션에서 처리된다.
     모든 URL 처리가 끝난 뒤 write_batch()를 한 번만 호출한다.
 
     Args:
-        urls: 분析할 URL 문자열 목록.
-        force_reanalyze: True면 이미 분析된 URL도 재분析.
+        urls: 분석할 URL 문자열 목록.
+        force_reanalyze: True면 이미 분석된 URL도 재분석.
 
     Returns:
         analyzed/skipped/failed/output_path 정보 딕셔너리
@@ -283,11 +283,11 @@ def analyze_urls_bulk(urls: list[str], force_reanalyze: bool) -> dict[str, Any]:
                 ex = existing_map.get(url)
                 if ex and not _is_failed_analysis(ex):
                     skipped += 1
-                    logger.debug(f"분析 스킵 (기존 데이터): {url}")
+                    logger.debug(f"분석 스킵 (기존 데이터): {url}")
                 else:
                     if ex:
                         logger.warning(
-                            f"이전 분析이 실패 상태입니다. 재분析합니다: {url} "
+                            f"이전 분석이 실패 상태입니다. 재분석합니다: {url} "
                             f"(title={ex.title!r}, description={ex.description!r})"
                         )
                     pending_urls.append(url)
@@ -312,7 +312,7 @@ def analyze_urls_bulk(urls: list[str], force_reanalyze: bool) -> dict[str, Any]:
         db.close()
 
     if not pending_urls:
-        logger.info(f"배치 완료: 분析 0건, 스킵 {skipped}건, 실패 0건")
+        logger.info(f"배치 완료: 분석 0건, 스킵 {skipped}건, 실패 0건")
         return {"analyzed": 0, "skipped": skipped, "failed": 0, "output_path": None}
 
     batch_results: list[tuple[str, dict[str, Any]]] = []
@@ -328,14 +328,14 @@ def analyze_urls_bulk(urls: list[str], force_reanalyze: bool) -> dict[str, Any]:
         for future in as_completed(futures):
             url, job_id, result, error = future.result()
             if error:
-                logger.error(f"배치 항목 分析 실패: {url} ({error})")
+                logger.error(f"배치 항목 분석 실패: {url} ({error})")
                 failure_map[job_id] = error
             else:
                 if result is None:
-                    raise AnalysisError(f"배치 分析 결과가 None입니다: {url}")
+                    raise AnalysisError(f"배치 분석 결과가 None입니다: {url}")
                 batch_results.append((url, result))
                 success_map[job_id] = result.get("site_id")
-                logger.info(f"배치 분析 완료: {url}")
+                logger.info(f"배치 분석 완료: {url}")
 
     # Job 상태 일괄 업데이트 (세션 1개)
     _update_job_statuses(success_map, failure_map)
@@ -345,7 +345,7 @@ def analyze_urls_bulk(urls: list[str], force_reanalyze: bool) -> dict[str, Any]:
 
     failed = len(failure_map)
     logger.info(
-        f"배치 완료: 分析 {len(batch_results)}건, 스킵 {skipped}건, "
+        f"배치 완료: 분석 {len(batch_results)}건, 스킵 {skipped}건, "
         f"실패 {failed}건, 출력 파일: {output_path}"
     )
 

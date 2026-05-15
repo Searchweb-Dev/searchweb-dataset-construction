@@ -141,7 +141,7 @@ async def analyze_batch_upload(
 
     Args:
         file: 업로드할 URL 목록 파일.
-        force_reanalyze: 기존 分류 결과 무시 여부.
+        force_reanalyze: 기존 분류 결과 무시 여부.
         api_key: API 키 검증 의존성.
 
     Returns:
