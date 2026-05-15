@@ -1,7 +1,5 @@
 """공통 베이스 ORM 모델."""
 
-from datetime import datetime
-from typing import Optional
 from sqlalchemy import Column, Integer, DateTime, func
 from sqlalchemy.orm import declarative_base
 
@@ -13,9 +11,15 @@ class BaseModel(Base):
 
     __abstract__ = True
 
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
-    deleted_at = Column(DateTime, nullable=True, default=None)
-    created_by_member_id = Column(Integer, nullable=True)
-    updated_by_member_id = Column(Integer, nullable=True)
-    deleted_by_member_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False,
+                        comment="레코드 생성 시각 (UTC)")
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False,
+                        comment="레코드 최종 수정 시각 (UTC)")
+    deleted_at = Column(DateTime, nullable=True, default=None,
+                        comment="소프트 삭제 시각 (NULL이면 유효 레코드)")
+    created_by_member_id = Column(Integer, nullable=True,
+                                  comment="생성한 회원 ID")
+    updated_by_member_id = Column(Integer, nullable=True,
+                                  comment="최종 수정한 회원 ID")
+    deleted_by_member_id = Column(Integer, nullable=True,
+                                  comment="삭제한 회원 ID")

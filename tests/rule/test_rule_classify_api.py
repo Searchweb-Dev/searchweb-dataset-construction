@@ -7,7 +7,7 @@ run_quality_pipeline과 AIDetector를 mock해 외부 네트워크·DB 호출 없
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -83,8 +83,12 @@ def _make_saved_result(site_id: int = 1, is_ai_tool: bool = True) -> dict:
 
 @pytest.fixture
 def client() -> TestClient:
-    """API 키 검증과 DB 세션을 bypass한 테스트 클라이언트."""
+    """API 키 검증과 DB 세션을 bypass한 테스트 클라이언트.
+
+    DB 캐시 조회 결과를 None으로 고정해 파이프라인 실행 경로를 테스트한다.
+    """
     mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
     app.dependency_overrides[verify_api_key] = lambda: API_KEY
     app.dependency_overrides[get_db] = lambda: mock_db
     yield TestClient(app)
@@ -415,3 +419,133 @@ class TestRuleClassifyDbError:
 
         # Assert
         assert response.status_code == 500
+
+
+# ────────────────────────────────────────────
+# 캐시 스킵 케이스
+# ────────────────────────────────────────────
+
+def _make_ai_site_mock(
+    *,
+    site_id: int = 1,
+    url: str = "https://example.com",
+    is_ai_tool: bool = True,
+    analyzer: str = "rule",
+    hard_pass: Optional[bool] = True,
+    total_score: Optional[float] = 75.0,
+    review_required: Optional[bool] = False,
+) -> Any:
+    """테스트용 AISite mock 객체를 생성한다."""
+    site = MagicMock()
+    site.site_id = site_id
+    site.url = url
+    site.is_ai_tool = is_ai_tool
+    site.analyzer = analyzer
+    site.hard_pass = hard_pass
+    site.total_score = total_score
+    site.review_required = review_required
+    return site
+
+
+def _client_with_cached_site(site: Any) -> TestClient:
+    """지정된 AISite mock을 DB 캐시로 반환하는 테스트 클라이언트를 생성한다."""
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = site
+    app.dependency_overrides[verify_api_key] = lambda: API_KEY
+    app.dependency_overrides[get_db] = lambda: mock_db
+    return TestClient(app)
+
+
+class TestRuleClassifyCacheHit:
+    """DB 캐시 결과 반환 케이스 검증."""
+
+    def teardown_method(self) -> None:
+        app.dependency_overrides.clear()
+
+    def test_llm_cache_returns_200_without_pipeline(self) -> None:
+        """LLM 분석 결과(analyzer=gemini)가 있으면 파이프라인 없이 200을 반환해야 한다."""
+        # Arrange
+        site = _make_ai_site_mock(analyzer="gemini", hard_pass=None, total_score=None, review_required=None)
+        client = _client_with_cached_site(site)
+
+        with patch("src.api.rule_routes.run_quality_pipeline") as mock_pipeline:
+            # Act
+            response = client.post(CLASSIFY_URL, json={"url": "https://example.com"}, headers=HEADERS)
+
+        # Assert
+        assert response.status_code == 200
+        mock_pipeline.assert_not_called()
+
+    def test_llm_cache_response_has_site_id(self) -> None:
+        """LLM 캐시 반환 시 site_id가 응답에 포함되어야 한다."""
+        # Arrange
+        site = _make_ai_site_mock(site_id=99, analyzer="gemini", hard_pass=None, total_score=None, review_required=None)
+        client = _client_with_cached_site(site)
+
+        with patch("src.api.rule_routes.run_quality_pipeline"):
+            body = client.post(CLASSIFY_URL, json={"url": "https://example.com"}, headers=HEADERS).json()
+
+        assert body["site_id"] == 99
+
+    def test_trustworthy_rule_cache_skips_pipeline(self) -> None:
+        """신뢰 조건을 충족하는 규칙기반 캐시가 있으면 파이프라인을 실행하지 않아야 한다."""
+        # Arrange: hard_pass=True, review_required=False, total_score >= 60
+        site = _make_ai_site_mock(analyzer="rule", hard_pass=True, total_score=80.0, review_required=False)
+        client = _client_with_cached_site(site)
+
+        with patch("src.api.rule_routes.run_quality_pipeline") as mock_pipeline:
+            response = client.post(CLASSIFY_URL, json={"url": "https://example.com"}, headers=HEADERS)
+
+        assert response.status_code == 200
+        mock_pipeline.assert_not_called()
+
+    def test_low_score_rule_cache_runs_pipeline(self) -> None:
+        """total_score가 임계값 미달인 규칙기반 캐시는 파이프라인을 재실행해야 한다."""
+        # Arrange: total_score < 60
+        site = _make_ai_site_mock(analyzer="rule", hard_pass=True, total_score=50.0, review_required=False)
+        client = _client_with_cached_site(site)
+
+        mock_pipeline = _make_pipeline_result()
+        mock_saved = _make_saved_result()
+
+        with patch("src.api.rule_routes.run_quality_pipeline", return_value=mock_pipeline) as mock_p, \
+             patch("src.api.rule_routes.AIDetector") as MockDetector:
+            MockDetector.return_value.detect_and_save.return_value = mock_saved
+            response = client.post(CLASSIFY_URL, json={"url": "https://example.com"}, headers=HEADERS)
+
+        assert response.status_code == 200
+        mock_p.assert_called_once()
+
+    def test_review_required_rule_cache_runs_pipeline(self) -> None:
+        """review_required=True인 규칙기반 캐시는 파이프라인을 재실행해야 한다."""
+        # Arrange
+        site = _make_ai_site_mock(analyzer="rule", hard_pass=True, total_score=80.0, review_required=True)
+        client = _client_with_cached_site(site)
+
+        mock_pipeline = _make_pipeline_result()
+        mock_saved = _make_saved_result()
+
+        with patch("src.api.rule_routes.run_quality_pipeline", return_value=mock_pipeline) as mock_p, \
+             patch("src.api.rule_routes.AIDetector") as MockDetector:
+            MockDetector.return_value.detect_and_save.return_value = mock_saved
+            response = client.post(CLASSIFY_URL, json={"url": "https://example.com"}, headers=HEADERS)
+
+        assert response.status_code == 200
+        mock_p.assert_called_once()
+
+    def test_hard_pass_false_rule_cache_runs_pipeline(self) -> None:
+        """hard_pass=False인 규칙기반 캐시는 파이프라인을 재실행해야 한다."""
+        # Arrange
+        site = _make_ai_site_mock(analyzer="rule", hard_pass=False, total_score=80.0, review_required=False)
+        client = _client_with_cached_site(site)
+
+        mock_pipeline = _make_pipeline_result()
+        mock_saved = _make_saved_result()
+
+        with patch("src.api.rule_routes.run_quality_pipeline", return_value=mock_pipeline) as mock_p, \
+             patch("src.api.rule_routes.AIDetector") as MockDetector:
+            MockDetector.return_value.detect_and_save.return_value = mock_saved
+            response = client.post(CLASSIFY_URL, json={"url": "https://example.com"}, headers=HEADERS)
+
+        assert response.status_code == 200
+        mock_p.assert_called_once()

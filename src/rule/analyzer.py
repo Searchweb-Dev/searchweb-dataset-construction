@@ -137,6 +137,9 @@ def _map_to_analysis_dict(result: EvaluationResult, input_url: str) -> Dict[str,
             "originality": 5,
         },
         "analyzer": "rule",
+        "hard_pass": result.hard_pass,
+        "total_score": result.total_score,
+        "review_required": result.review_required,
     }
 
 

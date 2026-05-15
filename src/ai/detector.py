@@ -95,6 +95,9 @@ class AIDetector:
             existing.score_trust = scores.get("trust", 0)
             existing.score_originality = scores.get("originality", 0)
             existing.analyzer = analysis.get("analyzer")
+            existing.hard_pass = analysis.get("hard_pass")
+            existing.total_score = analysis.get("total_score")
+            existing.review_required = analysis.get("review_required")
             existing.last_analyzed_at = now
             self.db.add(existing)
             return existing
@@ -108,6 +111,9 @@ class AIDetector:
             score_trust=scores.get("trust", 0),
             score_originality=scores.get("originality", 0),
             analyzer=analysis.get("analyzer"),
+            hard_pass=analysis.get("hard_pass"),
+            total_score=analysis.get("total_score"),
+            review_required=analysis.get("review_required"),
             last_analyzed_at=now,
         )
         self.db.add(site)
