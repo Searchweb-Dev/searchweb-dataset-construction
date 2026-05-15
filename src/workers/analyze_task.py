@@ -263,6 +263,82 @@ def analyze_website(self, job_id: str, url: str) -> dict[str, Any]:
 
 
 
+def _analyze_batch_with_llm(
+    urls: list[str],
+    job_id_map: dict[str, UUID],
+    analyzer: Any,
+) -> tuple[list[tuple[str, dict[str, Any]]], dict[UUID, int | None], dict[UUID, str]]:
+    """배치 지원 분석기로 URL 목록을 한 번에 분석하고 DB에 저장한다.
+
+    analyze_websites_batch()를 호출해 LLM 호출 횟수를 최소화한다.
+    결과는 단일 DB 세션에서 순차 저장한다.
+
+    Returns:
+        (batch_results, success_map, failure_map) 튜플.
+    """
+    batch_results: list[tuple[str, dict[str, Any]]] = []
+    success_map: dict[UUID, int | None] = {}
+    failure_map: dict[UUID, str] = {}
+
+    logger.info(
+        "[batch_llm] 배치 LLM 호출 시작: %d개 URL %s",
+        len(urls), urls,
+    )
+    try:
+        analyses = analyzer.analyze_websites_batch(urls)
+    except Exception as e:
+        logger.error("[batch_llm] LLM 배치 호출 실패: %s", e)
+        for url in urls:
+            failure_map[job_id_map[url]] = str(e)
+        return batch_results, success_map, failure_map
+
+    logger.info("[batch_llm] 배치 LLM 호출 완료")
+
+    db = SessionLocal()
+    try:
+        detector = AIDetector(db, analyzer=analyzer)
+        for url, analysis in zip(urls, analyses):
+            job_id = job_id_map[url]
+            try:
+                if not detector._validate_analysis(analysis):
+                    raise AnalysisError(f"분류 결과 검증 실패: {url}")
+
+                ai_site = detector._save_site(url=url, analysis=analysis)
+                if ai_site:
+                    detector._save_categories_and_tags(
+                        ai_site.site_id,
+                        analysis.get("categories", []),
+                        analysis.get("tags", []),
+                    )
+                db.commit()
+
+                result = {
+                    "site_id": ai_site.site_id if ai_site else None,
+                    "is_ai_tool": analysis["is_ai_tool"],
+                    "title": analysis.get("title", ""),
+                    "description": analysis.get("description", ""),
+                    "categories": analysis.get("categories", []),
+                    "tags": analysis.get("tags", []),
+                    "scores": analysis.get("scores", {}),
+                    "confidence": analysis.get("confidence", 0),
+                    "analyzer": analysis.get("analyzer"),
+                }
+                batch_results.append((url, result))
+                success_map[job_id] = ai_site.site_id if ai_site else None
+                logger.info(
+                    "[batch_llm] 저장 완료: %s | is_ai_tool=%s",
+                    url, analysis.get("is_ai_tool"),
+                )
+            except Exception as e:
+                logger.error("[batch_llm] 항목 저장 실패: %s (%s)", url, e)
+                db.rollback()
+                failure_map[job_id] = str(e)
+    finally:
+        db.close()
+
+    return batch_results, success_map, failure_map
+
+
 def _analyze_one(url: str, job_id: UUID) -> tuple[str, UUID, dict[str, Any] | None, str | None]:
     """
     URL 하나를 독립 DB 세션으로 분석한다. ThreadPoolExecutor 워커에서 호출된다.
@@ -381,28 +457,35 @@ def analyze_ai_tools_batch(urls: list[str], force_reanalyze: bool) -> dict[str, 
         logger.info(f"배치 완료: 분석 0건, 스킵 {skipped}건, 실패 0건")
         return {"analyzed": 0, "skipped": skipped, "failed": 0, "output_path": None}
 
-    # 2. 병렬 LLM 분석 (각 워커는 독립 DB 세션 사용)
     batch_results: list[tuple[str, dict[str, Any]]] = []
     success_map: dict[UUID, int | None] = {}
     failure_map: dict[UUID, str] = {}
 
-    with ThreadPoolExecutor(max_workers=_BATCH_CONCURRENCY) as executor:
-        futures = {
-            executor.submit(_analyze_one, url, job_id_map[url]): url
-            for url in pending_urls
-        }
+    analyzer = get_llm_analyzer()
 
-        for future in as_completed(futures):
-            url, job_id, result, error = future.result()
-            if error:
-                logger.error(f"배치 항목 분석 실패: {url} ({error})")
-                failure_map[job_id] = error
-            else:
-                if result is None:
-                    raise AnalysisError(f"배치 분석 결과가 None입니다: {url}")
-                batch_results.append((url, result))
-                success_map[job_id] = result.get("site_id")
-                logger.info(f"배치 분석 완료: {url}")
+    if hasattr(analyzer, "analyze_websites_batch"):
+        # 2-A. 배치 지원 분석기: URL 전체를 LLM 1회 호출로 처리 후 DB 일괄 저장
+        batch_results, success_map, failure_map = _analyze_batch_with_llm(
+            pending_urls, job_id_map, analyzer
+        )
+    else:
+        # 2-B. 단건 분석기: ThreadPoolExecutor로 병렬 처리
+        with ThreadPoolExecutor(max_workers=_BATCH_CONCURRENCY) as executor:
+            futures = {
+                executor.submit(_analyze_one, url, job_id_map[url]): url
+                for url in pending_urls
+            }
+            for future in as_completed(futures):
+                url, job_id, result, error = future.result()
+                if error:
+                    logger.error(f"배치 항목 분석 실패: {url} ({error})")
+                    failure_map[job_id] = error
+                else:
+                    if result is None:
+                        raise AnalysisError(f"배치 분석 결과가 None입니다: {url}")
+                    batch_results.append((url, result))
+                    success_map[job_id] = result.get("site_id")
+                    logger.info(f"배치 분석 완료: {url}")
 
     # 3. Job 상태 일괄 업데이트 (세션 1개)
     _update_job_statuses(success_map, failure_map)
