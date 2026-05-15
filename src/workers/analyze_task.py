@@ -277,9 +277,9 @@ def _analyze_batch_with_llm(
     job_id_map: dict[str, UUID],
     analyzer: Any,
 ) -> tuple[list[tuple[str, dict[str, Any]]], dict[UUID, int | None], dict[UUID, str]]:
-    """배치 지원 분석기로 URL 목록을 청크 단위로 분석하고 DB에 저장한다.
+    """URL 목록을 단건 LLM 호출로 순차 분석하고 DB에 저장한다.
 
-    URL 전체를 _BATCH_CHUNK_SIZE 단위로 나눠 analyze_websites_batch()를 호출한다.
+    url_context 툴은 단건 URL만 안정적으로 처리하므로 analyze_website()를 순차 호출한다.
     결과는 단일 DB 세션에서 순차 저장한다.
 
     Returns:
@@ -289,33 +289,31 @@ def _analyze_batch_with_llm(
     success_map: dict[UUID, int | None] = {}
     failure_map: dict[UUID, str] = {}
 
-    chunks = [urls[i:i + _BATCH_CHUNK_SIZE] for i in range(0, len(urls), _BATCH_CHUNK_SIZE)]
-    logger.info(
-        "[batch_llm] 배치 LLM 호출 시작: %d개 URL, 청크 %d개 (청크 크기: %d)",
-        len(urls), len(chunks), _BATCH_CHUNK_SIZE,
-    )
+    logger.info("[batch_llm] LLM 분석 시작: %d개 URL", len(urls))
 
-    analyses: list[dict[str, Any]] = []
-    for idx, chunk in enumerate(chunks, 1):
+    analyses: list[tuple[str, dict[str, Any] | None, str | None]] = []
+    for url in urls:
         try:
-            chunk_results = analyzer.analyze_websites_batch(chunk)
-            analyses.extend(chunk_results)
-            logger.info("[batch_llm] 청크 %d/%d 완료 (%d개)", idx, len(chunks), len(chunk))
+            result = analyzer.analyze_website(url)
+            analyses.append((url, result, None))
         except Exception as e:
-            logger.error("[batch_llm] 청크 %d/%d LLM 호출 실패: %s", idx, len(chunks), e)
-            for url in chunk:
-                failure_map[job_id_map[url]] = str(e)
-            analyses.extend([None] * len(chunk))  # 실패 청크는 None으로 채움
+            logger.error("[batch_llm] LLM 호출 실패: %s (%s)", url, e)
+            analyses.append((url, None, str(e)))
+            failure_map[job_id_map[url]] = str(e)
 
-    logger.info("[batch_llm] 배치 LLM 호출 완료 (성공 %d개)", len([a for a in analyses if a is not None]))
+    logger.info(
+        "[batch_llm] LLM 호출 완료 (성공 %d개, 실패 %d개)",
+        sum(1 for _, r, _ in analyses if r is not None),
+        len(failure_map),
+    )
 
     db = SessionLocal()
     try:
         detector = AIDetector(db, analyzer=analyzer)
-        for url, analysis in zip(urls, analyses):
+        for url, analysis, _ in analyses:
             job_id = job_id_map[url]
             if job_id in failure_map:
-                continue  # 청크 호출 실패로 이미 failure_map에 등록된 항목
+                continue  # LLM 호출 단계에서 이미 실패 처리된 항목
             try:
                 if analysis is None or not detector._validate_analysis(analysis):
                     raise AnalysisError(f"분류 결과 검증 실패: {url}")
