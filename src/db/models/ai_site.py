@@ -6,6 +6,12 @@ from .base import BaseModel
 # 접근 불가 URL 재시도 대기 기간 (초). 이 기간이 지나면 재분석 대상으로 전환된다.
 UNREACHABLE_TTL_SECONDS = 7 * 24 * 3600
 
+# ai_site.status 허용 값
+SITE_STATUS_OK = "ok"
+SITE_STATUS_UNREACHABLE = "unreachable"
+SITE_STATUS_BLOCKED = "blocked"
+SITE_STATUS_FAILURE = "failure"
+
 
 class AISite(BaseModel):
     """분석된 AI 서비스 웹사이트 정보."""
@@ -44,5 +50,7 @@ class AISite(BaseModel):
                              comment="수동 검수 필요 여부")
     last_analyzed_at = Column(DateTime, nullable=True, index=True,
                               comment="마지막 분석 완료 시각 (UTC)")
+    status = Column(String(20), nullable=True, index=True,
+                    comment="분석 상태 (ok / unreachable / blocked / failure). NULL은 미분류.")
     unreachable_since = Column(DateTime, nullable=True,
                                comment="400 접근 불가 최초 감지 시각 (UTC). NULL이면 접근 가능 상태.")

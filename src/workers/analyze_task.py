@@ -29,7 +29,13 @@ from src.core.exceptions import (
     ApiTimeoutError,
 )
 from src.core.enums import JobStatus
-from src.db.models.ai_site import UNREACHABLE_TTL_SECONDS
+from src.db.models.ai_site import (
+    UNREACHABLE_TTL_SECONDS,
+    SITE_STATUS_OK,
+    SITE_STATUS_UNREACHABLE,
+    SITE_STATUS_BLOCKED,
+    SITE_STATUS_FAILURE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,52 +43,42 @@ logger = logging.getLogger(__name__)
 # LLM API rate limit과 DB 연결 수를 고려하여 조정한다.
 _BATCH_CONCURRENCY = int(os.getenv("BATCH_CONCURRENCY", "5"))
 
-_FAILURE_SENTINELS = {"Unknown", "분석 실패", ""}
-
-
 def _is_failed_analysis(site: AISite) -> bool:
-    """이전 분석이 실패 기본값인지 확인.
-
-    title과 description 모두 sentinel일 때만 실패로 판단한다.
-    둘 중 하나만 비어있는 경우는 정상 데이터로 간주한다.
-    """
-    return (
-        (site.title or "") in _FAILURE_SENTINELS
-        and (site.description or "") in _FAILURE_SENTINELS
-    )
+    """이전 분석이 실패 상태인지 확인."""
+    return site.status in (SITE_STATUS_FAILURE, SITE_STATUS_BLOCKED)
 
 
 def _is_unreachable_blocked(site: AISite) -> bool:
     """접근 불가 TTL 이내인지 확인한다.
 
-    unreachable_since가 설정된 지 UNREACHABLE_TTL_SECONDS 이내이면 True를 반환해
-    재분석 없이 스킵한다. TTL이 지났으면 False를 반환하여 재시도 대상으로 전환한다.
+    status가 unreachable이고 unreachable_since 기록 후 UNREACHABLE_TTL_SECONDS 이내이면
+    True를 반환해 재분석 없이 스킵한다. TTL이 지났으면 False를 반환하여 재시도 대상으로 전환한다.
     """
-    if site.unreachable_since is None:
+    if site.status != SITE_STATUS_UNREACHABLE or site.unreachable_since is None:
         return False
     elapsed = (datetime.now(timezone.utc) - site.unreachable_since.replace(tzinfo=timezone.utc)).total_seconds()
     return elapsed < UNREACHABLE_TTL_SECONDS
 
 
-def _mark_unreachable(db: Any, url: str) -> None:
-    """URL을 접근 불가 상태로 DB에 기록한다.
+def _mark_site_status(db: Any, url: str, status: str) -> None:
+    """URL의 분석 실패 상태를 DB에 기록한다.
 
     기존 레코드가 없으면 최소 정보로 새 레코드를 생성한다.
-    이미 unreachable_since가 설정된 경우 덮어쓰지 않는다 (최초 감지 시각 보존).
+    unreachable의 경우 unreachable_since는 최초 감지 시각을 보존한다.
     """
     now = utc_now()
     site = db.query(AISite).filter(AISite.url == url).first()
     if site:
-        if site.unreachable_since is None:
+        site.status = status
+        if status == SITE_STATUS_UNREACHABLE and site.unreachable_since is None:
             site.unreachable_since = now
-            db.commit()
+        db.commit()
     else:
         site = AISite(
             url=url,
             is_ai_tool=False,
-            title="Unknown",
-            description="분석 실패",
-            unreachable_since=now,
+            status=status,
+            unreachable_since=now if status == SITE_STATUS_UNREACHABLE else None,
         )
         db.add(site)
         db.commit()
@@ -166,10 +162,10 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
 
     except (SiteUnreachableError, ApiNotFoundError) as e:
         policy = get_policy(e)
-        logger.warning("%s — unreachable_since 기록: %s", policy.description, url)
+        logger.warning("%s — %s 기록: %s", policy.description, policy.site_status, url)
         db.rollback()
         db.expire_all()
-        _mark_unreachable(db, url)
+        _mark_site_status(db, url, policy.site_status)
 
         job = db.query(AnalysisJob).filter(AnalysisJob.job_id == job_id).first()
         if job:
@@ -178,7 +174,7 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
             job.error_message = str(e)
             db.commit()
 
-        return {"job_id": str(job_id), "status": JobStatus.FAILED, "error": "unreachable"}
+        return {"job_id": str(job_id), "status": JobStatus.FAILED, "error": policy.site_status}
 
     except (RateLimitError, ApiTimeoutError, ApiServerUnavailableError, ApiServerInternalError) as e:
         policy = get_policy(e)
@@ -210,6 +206,7 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
         logger.error("%s — 재시도 불가, 즉시 실패: %s", policy.description, url)
         db.rollback()
         db.expire_all()
+        _mark_site_status(db, url, policy.site_status)
 
         job = db.query(AnalysisJob).filter(AnalysisJob.job_id == job_id).first()
         if job:
@@ -223,7 +220,7 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"분석 작업 실패: {e}")
         db.rollback()
-        db.expire_all()  # rollback 후 stale 객체 제거
+        db.expire_all()
 
         job = db.query(AnalysisJob).filter(AnalysisJob.job_id == job_id).first()
         if job:
@@ -236,6 +233,7 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
             else:
                 job.status = JobStatus.FAILED
                 job.completed_at = utc_now()
+                _mark_site_status(db, url, SITE_STATUS_FAILURE)
                 logger.error(f"최종 실패: {job_id}")
 
             db.commit()
@@ -325,9 +323,9 @@ def _analyze_one(url: str, job_id: UUID) -> tuple[str, UUID, dict[str, Any] | No
         return url, job_id, result, None
     except (SiteUnreachableError, ApiNotFoundError) as e:
         policy = get_policy(e)
-        logger.warning("%s — unreachable_since 기록: %s", policy.description, url)
-        _mark_unreachable(db, url)
-        return url, job_id, None, "unreachable"
+        logger.warning("%s — %s 기록: %s", policy.description, policy.site_status, url)
+        _mark_site_status(db, url, policy.site_status)
+        return url, job_id, None, policy.site_status
     except (RateLimitError, ApiTimeoutError, ApiServerUnavailableError, ApiServerInternalError) as e:
         policy = get_policy(e)
         logger.warning("%s: %s", policy.description, url)
@@ -335,6 +333,7 @@ def _analyze_one(url: str, job_id: UUID) -> tuple[str, UUID, dict[str, Any] | No
     except (ApiUnauthenticatedError, ApiPermissionDeniedError, ApiPreconditionError) as e:
         policy = get_policy(e)
         logger.error("%s: %s", policy.description, url)
+        _mark_site_status(db, url, policy.site_status)
         return url, job_id, None, str(e)
     except Exception as e:
         return url, job_id, None, str(e)
@@ -412,8 +411,7 @@ def analyze_urls_bulk(urls: list[str], force_reanalyze: bool, source_path: Optio
                     logger.warning("접근 불가 TTL 이내 — 분석 스킵: %s", url)
                 elif ex and _is_failed_analysis(ex):
                     logger.warning(
-                        "이전 분석이 실패 상태입니다. 재분석합니다: %s "
-                        "(title=%r, description=%r)", url, ex.title, ex.description
+                        "이전 분석이 실패 상태입니다. 재분석합니다: %s (status=%r)", url, ex.status
                     )
                     pending_urls.append(url)
                 elif ex and ex.analyzer in (None, "rule"):

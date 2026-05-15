@@ -5,6 +5,7 @@ from typing import Optional, Any
 from sqlalchemy.orm import Session
 
 from src.db.models import AISite, AICategory, AITag
+from src.db.models.ai_site import SITE_STATUS_OK
 from src.ai.analyzer import get_analyzer
 from src.core.config import get_llm_provider
 from src.core.exceptions import SiteUnreachableError
@@ -103,6 +104,8 @@ class AIDetector:
             existing.total_score = analysis.get("total_score")
             existing.review_required = analysis.get("review_required")
             existing.last_analyzed_at = now
+            existing.status = SITE_STATUS_OK
+            existing.unreachable_since = None
             self.db.add(existing)
             return existing
 
@@ -119,6 +122,7 @@ class AIDetector:
             total_score=analysis.get("total_score"),
             review_required=analysis.get("review_required"),
             last_analyzed_at=now,
+            status=SITE_STATUS_OK,
         )
         self.db.add(site)
         self.db.flush()

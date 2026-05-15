@@ -53,6 +53,7 @@ class ErrorPolicy:
     mark_unreachable: bool  # DB에 unreachable_since 기록 여부
     log_level: str          # "warning" | "error"
     description: str        # 로그/메시지용 한글 설명
+    site_status: str | None = None  # ai_site.status 설정값. None이면 ai_site 건드리지 않음
 
 
 # 에러 종류 → 처리 정책 매핑
@@ -63,6 +64,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=True,
         log_level="warning",
         description="사이트 접근 불가 (400/INVALID_ARGUMENT)",
+        site_status="unreachable",
     ),
     ApiErrorKind.PRECONDITION_FAILED: ErrorPolicy(
         kind=ApiErrorKind.PRECONDITION_FAILED,
@@ -70,6 +72,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=False,
         log_level="error",
         description="사전 조건 미충족 (400/FAILED_PRECONDITION)",
+        site_status="blocked",
     ),
     ApiErrorKind.NOT_FOUND: ErrorPolicy(
         kind=ApiErrorKind.NOT_FOUND,
@@ -77,6 +80,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=True,
         log_level="warning",
         description="리소스 없음 (404/NOT_FOUND)",
+        site_status="unreachable",
     ),
     ApiErrorKind.AUTH_ERROR: ErrorPolicy(
         kind=ApiErrorKind.AUTH_ERROR,
@@ -84,6 +88,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=False,
         log_level="error",
         description="API 인증 실패 (401/UNAUTHENTICATED)",
+        site_status="blocked",
     ),
     ApiErrorKind.PERMISSION_DENIED: ErrorPolicy(
         kind=ApiErrorKind.PERMISSION_DENIED,
@@ -91,6 +96,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=False,
         log_level="error",
         description="API 권한 없음 (403/PERMISSION_DENIED)",
+        site_status="blocked",
     ),
     ApiErrorKind.RATE_LIMITED: ErrorPolicy(
         kind=ApiErrorKind.RATE_LIMITED,
@@ -98,6 +104,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=False,
         log_level="warning",
         description="API 할당량 초과 (429/RESOURCE_EXHAUSTED)",
+        site_status=None,
     ),
     ApiErrorKind.TIMEOUT: ErrorPolicy(
         kind=ApiErrorKind.TIMEOUT,
@@ -105,6 +112,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=False,
         log_level="warning",
         description="요청 타임아웃 (504/DEADLINE_EXCEEDED)",
+        site_status=None,
     ),
     ApiErrorKind.SERVER_UNAVAILABLE: ErrorPolicy(
         kind=ApiErrorKind.SERVER_UNAVAILABLE,
@@ -112,6 +120,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=False,
         log_level="warning",
         description="API 서버 일시 불가 (503/UNAVAILABLE)",
+        site_status=None,
     ),
     ApiErrorKind.SERVER_INTERNAL: ErrorPolicy(
         kind=ApiErrorKind.SERVER_INTERNAL,
@@ -119,6 +128,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=False,
         log_level="error",
         description="API 서버 내부 오류 (500/INTERNAL)",
+        site_status=None,
     ),
     ApiErrorKind.UNKNOWN: ErrorPolicy(
         kind=ApiErrorKind.UNKNOWN,
@@ -126,6 +136,7 @@ POLICIES: dict[ApiErrorKind, ErrorPolicy] = {
         mark_unreachable=False,
         log_level="error",
         description="알 수 없는 오류",
+        site_status="failure",
     ),
 }
 
