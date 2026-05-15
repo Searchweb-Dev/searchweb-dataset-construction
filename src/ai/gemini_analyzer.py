@@ -9,7 +9,18 @@ from google.genai import types
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from src.core.config import get_gemini_model
-from src.core.exceptions import SiteUnreachableError
+from src.core.error_policy import ApiErrorKind, classify_api_error
+from src.core.exceptions import (
+    SiteUnreachableError,
+    RateLimitError,
+    ApiServerUnavailableError,
+    ApiServerInternalError,
+    ApiUnauthenticatedError,
+    ApiPermissionDeniedError,
+    ApiTimeoutError,
+    ApiPreconditionError,
+    ApiNotFoundError,
+)
 from src.ai.prompts import SYSTEM_PROMPT, ANALYSIS_PROMPT, BATCH_ANALYSIS_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -62,19 +73,29 @@ _BATCH_SCHEMA = {
 
 
 def _is_retryable(exc: BaseException) -> bool:
-    """재시도 가능한 오류인지 판별한다.
+    """재시도 가능한 오류인지 판별한다."""
+    from src.core.error_policy import get_policy
+    return get_policy(exc).retryable
 
-    503/429는 서버 측 일시 오류이므로 재시도하지 않는다.
-    400 INVALID_ARGUMENT는 요청 자체가 잘못된 것이므로 재시도해도 의미가 없다.
-    """
-    msg = str(exc)
-    if "503" in msg or "UNAVAILABLE" in msg:
-        return False
-    if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-        return False
-    if "400" in msg or "INVALID_ARGUMENT" in msg:
-        return False
-    return True
+
+def _raise_typed_error(exc: BaseException, url: str) -> None:
+    """에러 종류에 따라 적절한 도메인 예외를 발생시킨다."""
+    kind = classify_api_error(exc)
+    _KIND_TO_EXC = {
+        ApiErrorKind.UNREACHABLE:       (SiteUnreachableError,      f"사이트 접근 불가 (400): {url}"),
+        ApiErrorKind.PRECONDITION_FAILED: (ApiPreconditionError,    f"사전 조건 미충족 (400): {url}"),
+        ApiErrorKind.NOT_FOUND:         (ApiNotFoundError,          f"리소스 없음 (404): {url}"),
+        ApiErrorKind.AUTH_ERROR:        (ApiUnauthenticatedError,   f"API 인증 실패 (401): {url}"),
+        ApiErrorKind.PERMISSION_DENIED: (ApiPermissionDeniedError,  f"API 권한 없음 (403): {url}"),
+        ApiErrorKind.RATE_LIMITED:      (RateLimitError,            f"API 할당량 초과 (429): {url}"),
+        ApiErrorKind.TIMEOUT:           (ApiTimeoutError,           f"API 타임아웃 (504): {url}"),
+        ApiErrorKind.SERVER_UNAVAILABLE: (ApiServerUnavailableError, f"API 서버 일시 불가 (503): {url}"),
+        ApiErrorKind.SERVER_INTERNAL:   (ApiServerInternalError,    f"API 서버 내부 오류 (500): {url}"),
+    }
+    if kind in _KIND_TO_EXC:
+        exc_cls, msg = _KIND_TO_EXC[kind]
+        raise exc_cls(msg) from exc
+    raise
 
 
 class GeminiAnalyzer:
@@ -91,11 +112,15 @@ class GeminiAnalyzer:
         start_time = time.time()
         try:
             response = self._generate_single(url)
-        except Exception as exc:
-            msg = str(exc)
-            if "400" in msg or "INVALID_ARGUMENT" in msg:
-                raise SiteUnreachableError(f"사이트 접근 불가 (400): {url}") from exc
+        except (
+            SiteUnreachableError, ApiPreconditionError, ApiNotFoundError,
+            ApiUnauthenticatedError, ApiPermissionDeniedError,
+            RateLimitError, ApiTimeoutError,
+            ApiServerUnavailableError, ApiServerInternalError,
+        ):
             raise
+        except Exception as exc:
+            _raise_typed_error(exc, url)
         self._check_finish_reason(url, response)
 
         result = self._parse_single(response)

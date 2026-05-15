@@ -15,7 +15,19 @@ from src.workers.celery_app import app
 from src.core.result_writer import write_batch
 from src.core.url import normalize_url
 from src.core.util import utc_now
-from src.core.exceptions import AnalysisError, SiteUnreachableError
+from src.core.error_policy import get_policy
+from src.core.exceptions import (
+    AnalysisError,
+    SiteUnreachableError,
+    ApiNotFoundError,
+    ApiPreconditionError,
+    RateLimitError,
+    ApiServerUnavailableError,
+    ApiServerInternalError,
+    ApiUnauthenticatedError,
+    ApiPermissionDeniedError,
+    ApiTimeoutError,
+)
 from src.core.enums import JobStatus
 from src.db.models.ai_site import UNREACHABLE_TTL_SECONDS
 
@@ -152,8 +164,9 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
             "is_ai_tool": result.get("is_ai_tool"),
         }
 
-    except SiteUnreachableError as e:
-        logger.warning("사이트 접근 불가 (400) — unreachable_since 기록: %s", url)
+    except (SiteUnreachableError, ApiNotFoundError) as e:
+        policy = get_policy(e)
+        logger.warning("%s — unreachable_since 기록: %s", policy.description, url)
         db.rollback()
         db.expire_all()
         _mark_unreachable(db, url)
@@ -166,6 +179,46 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
             db.commit()
 
         return {"job_id": str(job_id), "status": JobStatus.FAILED, "error": "unreachable"}
+
+    except (RateLimitError, ApiTimeoutError, ApiServerUnavailableError, ApiServerInternalError) as e:
+        policy = get_policy(e)
+        logger.warning("%s — 재시도 예정: %s", policy.description, url)
+        db.rollback()
+        db.expire_all()
+
+        job = db.query(AnalysisJob).filter(AnalysisJob.job_id == job_id).first()
+        if job:
+            job.retry_count = self.request.retries
+            job.error_message = str(e)
+
+            if self.request.retries < self.max_retries:
+                job.status = JobStatus.PENDING
+            else:
+                job.status = JobStatus.FAILED
+                job.completed_at = utc_now()
+                logger.error("최종 실패 (%s): %s", policy.description, job_id)
+
+            db.commit()
+
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+
+        return {"job_id": str(job_id), "status": JobStatus.FAILED, "error": str(e)}
+
+    except (ApiUnauthenticatedError, ApiPermissionDeniedError, ApiPreconditionError) as e:
+        policy = get_policy(e)
+        logger.error("%s — 재시도 불가, 즉시 실패: %s", policy.description, url)
+        db.rollback()
+        db.expire_all()
+
+        job = db.query(AnalysisJob).filter(AnalysisJob.job_id == job_id).first()
+        if job:
+            job.status = JobStatus.FAILED
+            job.completed_at = utc_now()
+            job.error_message = str(e)
+            db.commit()
+
+        return {"job_id": str(job_id), "status": JobStatus.FAILED, "error": policy.kind}
 
     except Exception as e:
         logger.error(f"분석 작업 실패: {e}")
@@ -270,10 +323,19 @@ def _analyze_one(url: str, job_id: UUID) -> tuple[str, UUID, dict[str, Any] | No
         if not result:
             return url, job_id, None, "분석 실패"
         return url, job_id, result, None
-    except SiteUnreachableError:
-        logger.warning("사이트 접근 불가 (400) — unreachable_since 기록: %s", url)
+    except (SiteUnreachableError, ApiNotFoundError) as e:
+        policy = get_policy(e)
+        logger.warning("%s — unreachable_since 기록: %s", policy.description, url)
         _mark_unreachable(db, url)
         return url, job_id, None, "unreachable"
+    except (RateLimitError, ApiTimeoutError, ApiServerUnavailableError, ApiServerInternalError) as e:
+        policy = get_policy(e)
+        logger.warning("%s: %s", policy.description, url)
+        return url, job_id, None, str(e)
+    except (ApiUnauthenticatedError, ApiPermissionDeniedError, ApiPreconditionError) as e:
+        policy = get_policy(e)
+        logger.error("%s: %s", policy.description, url)
+        return url, job_id, None, str(e)
     except Exception as e:
         return url, job_id, None, str(e)
     finally:
