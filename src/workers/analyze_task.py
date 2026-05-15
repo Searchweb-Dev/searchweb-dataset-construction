@@ -15,8 +15,9 @@ from src.workers.celery_app import app
 from src.core.result_writer import write_batch
 from src.core.url import normalize_url
 from src.core.util import utc_now
-from src.core.exceptions import AnalysisError
+from src.core.exceptions import AnalysisError, SiteUnreachableError
 from src.core.enums import JobStatus
+from src.db.models.ai_site import UNREACHABLE_TTL_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,42 @@ def _is_failed_analysis(site: AISite) -> bool:
         (site.title or "") in _FAILURE_SENTINELS
         and (site.description or "") in _FAILURE_SENTINELS
     )
+
+
+def _is_unreachable_blocked(site: AISite) -> bool:
+    """접근 불가 TTL 이내인지 확인한다.
+
+    unreachable_since가 설정된 지 UNREACHABLE_TTL_SECONDS 이내이면 True를 반환해
+    재분석 없이 스킵한다. TTL이 지났으면 False를 반환하여 재시도 대상으로 전환한다.
+    """
+    if site.unreachable_since is None:
+        return False
+    elapsed = (datetime.now(timezone.utc) - site.unreachable_since.replace(tzinfo=timezone.utc)).total_seconds()
+    return elapsed < UNREACHABLE_TTL_SECONDS
+
+
+def _mark_unreachable(db: Any, url: str) -> None:
+    """URL을 접근 불가 상태로 DB에 기록한다.
+
+    기존 레코드가 없으면 최소 정보로 새 레코드를 생성한다.
+    이미 unreachable_since가 설정된 경우 덮어쓰지 않는다 (최초 감지 시각 보존).
+    """
+    now = utc_now()
+    site = db.query(AISite).filter(AISite.url == url).first()
+    if site:
+        if site.unreachable_since is None:
+            site.unreachable_since = now
+            db.commit()
+    else:
+        site = AISite(
+            url=url,
+            is_ai_tool=False,
+            title="Unknown",
+            description="분석 실패",
+            unreachable_since=now,
+        )
+        db.add(site)
+        db.commit()
 
 
 @app.task(bind=True, max_retries=3, autoretry_for=(), time_limit=300, soft_time_limit=240)
@@ -67,7 +104,14 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
 
         existing = db.query(AISite).filter(AISite.url == url).first()
         if existing and job.request_source != "force":
-            if _is_failed_analysis(existing):
+            if _is_unreachable_blocked(existing):
+                logger.warning("접근 불가 TTL 이내 — 분석 스킵: %s", url)
+                job.status = JobStatus.FAILED
+                job.completed_at = utc_now()
+                job.error_message = "사이트 접근 불가 (TTL 이내 스킵)"
+                db.commit()
+                return {"job_id": str(job_id), "status": JobStatus.FAILED, "error": "unreachable"}
+            elif _is_failed_analysis(existing):
                 logger.warning(
                     f"이전 분석이 실패 상태입니다. 재분석합니다: {url} "
                     f"(title={existing.title!r}, description={existing.description!r})"
@@ -107,6 +151,21 @@ def analyze_url(self, job_id: str, url: str) -> dict[str, Any]:
             "site_id": result.get("site_id"),
             "is_ai_tool": result.get("is_ai_tool"),
         }
+
+    except SiteUnreachableError as e:
+        logger.warning("사이트 접근 불가 (400) — unreachable_since 기록: %s", url)
+        db.rollback()
+        db.expire_all()
+        _mark_unreachable(db, url)
+
+        job = db.query(AnalysisJob).filter(AnalysisJob.job_id == job_id).first()
+        if job:
+            job.status = JobStatus.FAILED
+            job.completed_at = utc_now()
+            job.error_message = str(e)
+            db.commit()
+
+        return {"job_id": str(job_id), "status": JobStatus.FAILED, "error": "unreachable"}
 
     except Exception as e:
         logger.error(f"분석 작업 실패: {e}")
@@ -211,6 +270,10 @@ def _analyze_one(url: str, job_id: UUID) -> tuple[str, UUID, dict[str, Any] | No
         if not result:
             return url, job_id, None, "분석 실패"
         return url, job_id, result, None
+    except SiteUnreachableError:
+        logger.warning("사이트 접근 불가 (400) — unreachable_since 기록: %s", url)
+        _mark_unreachable(db, url)
+        return url, job_id, None, "unreachable"
     except Exception as e:
         return url, job_id, None, str(e)
     finally:
@@ -282,7 +345,10 @@ def analyze_urls_bulk(urls: list[str], force_reanalyze: bool, source_path: Optio
             }
             for url in normalized_urls:
                 ex = existing_map.get(url)
-                if ex and _is_failed_analysis(ex):
+                if ex and _is_unreachable_blocked(ex):
+                    skipped += 1
+                    logger.warning("접근 불가 TTL 이내 — 분석 스킵: %s", url)
+                elif ex and _is_failed_analysis(ex):
                     logger.warning(
                         "이전 분석이 실패 상태입니다. 재분석합니다: %s "
                         "(title=%r, description=%r)", url, ex.title, ex.description

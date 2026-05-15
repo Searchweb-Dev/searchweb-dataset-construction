@@ -3,6 +3,9 @@
 from sqlalchemy import Column, BigInteger, String, Boolean, Text, Integer, Float, DateTime
 from .base import BaseModel
 
+# 접근 불가 URL 재시도 대기 기간 (초). 이 기간이 지나면 재분석 대상으로 전환된다.
+UNREACHABLE_TTL_SECONDS = 7 * 24 * 3600
+
 
 class AISite(BaseModel):
     """분석된 AI 서비스 웹사이트 정보."""
@@ -41,3 +44,5 @@ class AISite(BaseModel):
                              comment="수동 검수 필요 여부")
     last_analyzed_at = Column(DateTime, nullable=True, index=True,
                               comment="마지막 분석 완료 시각 (UTC)")
+    unreachable_since = Column(DateTime, nullable=True,
+                               comment="400 접근 불가 최초 감지 시각 (UTC). NULL이면 접근 가능 상태.")

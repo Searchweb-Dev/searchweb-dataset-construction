@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from src.db.models import AISite, AICategory, AITag
 from src.ai.analyzer import get_analyzer
 from src.core.config import get_llm_provider
+from src.core.exceptions import SiteUnreachableError
 from src.core.url import normalize_url
 from src.core.util import utc_now
 
@@ -62,6 +63,9 @@ class AIDetector:
                 "analyzer": analysis_result.get("analyzer"),
             }
 
+        except SiteUnreachableError:
+            self.db.rollback()
+            raise
         except Exception as e:
             logger.error(f"AI 판별 중 오류: {e}")
             self.db.rollback()

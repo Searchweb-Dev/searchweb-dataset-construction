@@ -9,6 +9,7 @@ from google.genai import types
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from src.core.config import get_gemini_model
+from src.core.exceptions import SiteUnreachableError
 from src.ai.prompts import SYSTEM_PROMPT, ANALYSIS_PROMPT, BATCH_ANALYSIS_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,13 @@ class GeminiAnalyzer:
         """단건 URL 분석."""
         logger.info("[Gemini] 단건 분석 시작: %s", url)
         start_time = time.time()
-        response = self._generate_single(url)
+        try:
+            response = self._generate_single(url)
+        except Exception as exc:
+            msg = str(exc)
+            if "400" in msg or "INVALID_ARGUMENT" in msg:
+                raise SiteUnreachableError(f"사이트 접근 불가 (400): {url}") from exc
+            raise
         self._check_finish_reason(url, response)
 
         result = self._parse_single(response)
