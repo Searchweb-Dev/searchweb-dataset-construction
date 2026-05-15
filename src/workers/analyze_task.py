@@ -24,10 +24,6 @@ logger = logging.getLogger(__name__)
 # LLM API rate limit과 DB 연결 수를 고려하여 조정한다.
 _BATCH_CONCURRENCY = int(os.getenv("BATCH_CONCURRENCY", "5"))
 
-# LLM 배치 호출 1회당 처리할 최대 URL 수.
-# 프롬프트 토큰 한도 및 응답 안정성을 고려하여 설정한다.
-_BATCH_CHUNK_SIZE = int(os.getenv("BATCH_CHUNK_SIZE", "10"))
-
 _FAILURE_SENTINELS = {"Unknown", "분석 실패", ""}
 
 
@@ -46,15 +42,16 @@ def _is_failed_analysis(site: AISite) -> bool:
 # 전역 task_autoretry_for 미설정 — 재시도는 각 태스크가 명시적으로 관리한다.
 @app.task(bind=True, max_retries=3, autoretry_for=(), time_limit=600, soft_time_limit=540)
 def analyze_website_batch(self, job_ids: list[str], urls: list[str]) -> dict[str, Any]:
-    """URL 목록을 청크 단위 LLM 배치 호출로 분석한다.
+    """URL 목록을 LLM 1회 호출로 배치 분석한다.
 
     Args:
         job_ids: 분석 작업 ID 목록 (urls와 동일 순서).
-        urls: 분석 대상 URL 목록 (최대 _BATCH_CHUNK_SIZE개 권장).
+        urls: 분석 대상 URL 목록 (최대 5개).
 
     Returns:
         성공/실패 건수 요약 딕셔너리.
     """
+    from src.ai.gemini_analyzer import GeminiAnalyzer
     from src.ai.analyzer import get_llm_analyzer
 
     logger.info(
@@ -82,16 +79,10 @@ def analyze_website_batch(self, job_ids: list[str], urls: list[str]) -> dict[str
         analyzer = get_llm_analyzer()
         analyzer_name = type(analyzer).__name__
 
-        # 청크 단위 배치 분석
-        results: list[dict[str, Any]] = []
+        # 배치 분석 지원 여부에 따라 분기
         if hasattr(analyzer, "analyze_websites_batch"):
-            chunks = [urls[i:i + _BATCH_CHUNK_SIZE] for i in range(0, len(urls), _BATCH_CHUNK_SIZE)]
-            logger.info(
-                "[%s] 배치 LLM 호출 시작 (URL %d개, 청크 %d개)",
-                analyzer_name, len(urls), len(chunks),
-            )
-            for chunk in chunks:
-                results.extend(analyzer.analyze_websites_batch(chunk))
+            logger.info("[%s] 배치 LLM 호출 시작 (URL %d개 → 호출 1회)", analyzer_name, len(urls))
+            results = analyzer.analyze_websites_batch(urls)
             logger.info("[%s] 배치 LLM 호출 완료", analyzer_name)
         else:
             logger.info("[%s] 개별 LLM 호출 시작 (URL %d개)", analyzer_name, len(urls))
@@ -277,9 +268,9 @@ def _analyze_batch_with_llm(
     job_id_map: dict[str, UUID],
     analyzer: Any,
 ) -> tuple[list[tuple[str, dict[str, Any]]], dict[UUID, int | None], dict[UUID, str]]:
-    """URL 목록을 단건 LLM 호출로 순차 분석하고 DB에 저장한다.
+    """배치 지원 분석기로 URL 목록을 한 번에 분석하고 DB에 저장한다.
 
-    url_context 툴은 단건 URL만 안정적으로 처리하므로 analyze_website()를 순차 호출한다.
+    analyze_websites_batch()를 호출해 LLM 호출 횟수를 최소화한다.
     결과는 단일 DB 세션에서 순차 저장한다.
 
     Returns:
@@ -289,33 +280,27 @@ def _analyze_batch_with_llm(
     success_map: dict[UUID, int | None] = {}
     failure_map: dict[UUID, str] = {}
 
-    logger.info("[batch_llm] LLM 분석 시작: %d개 URL", len(urls))
-
-    analyses: list[tuple[str, dict[str, Any] | None, str | None]] = []
-    for url in urls:
-        try:
-            result = analyzer.analyze_website(url)
-            analyses.append((url, result, None))
-        except Exception as e:
-            logger.error("[batch_llm] LLM 호출 실패: %s (%s)", url, e)
-            analyses.append((url, None, str(e)))
-            failure_map[job_id_map[url]] = str(e)
-
     logger.info(
-        "[batch_llm] LLM 호출 완료 (성공 %d개, 실패 %d개)",
-        sum(1 for _, r, _ in analyses if r is not None),
-        len(failure_map),
+        "[batch_llm] 배치 LLM 호출 시작: %d개 URL %s",
+        len(urls), urls,
     )
+    try:
+        analyses = analyzer.analyze_websites_batch(urls)
+    except Exception as e:
+        logger.error("[batch_llm] LLM 배치 호출 실패: %s", e)
+        for url in urls:
+            failure_map[job_id_map[url]] = str(e)
+        return batch_results, success_map, failure_map
+
+    logger.info("[batch_llm] 배치 LLM 호출 완료")
 
     db = SessionLocal()
     try:
         detector = AIDetector(db, analyzer=analyzer)
-        for url, analysis, _ in analyses:
+        for url, analysis in zip(urls, analyses):
             job_id = job_id_map[url]
-            if job_id in failure_map:
-                continue  # LLM 호출 단계에서 이미 실패 처리된 항목
             try:
-                if analysis is None or not detector._validate_analysis(analysis):
+                if not detector._validate_analysis(analysis):
                     raise AnalysisError(f"분류 결과 검증 실패: {url}")
 
                 ai_site = detector._save_site(url=url, analysis=analysis)
