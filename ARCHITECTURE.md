@@ -273,9 +273,9 @@ Queue: analyze
 Celery Task: analyze_website(job_id, url)
   ├─ 1. Job 상태 업데이트: pending → processing (started_at 기록)
   ├─ 2. DB에서 기존 분석 결과 확인
-  │  ├─ 캐시 히트 (is_ai_tool이 존재, analyzer != rule)
+  │  ├─ 캐시 히트 (analyzer != "rule" 인 LLM 결과 존재)
   │  │  └─ Job 상태: success, site_id 반환 (LLM 호출 안 함)
-  │  └─ 캐시 미스 또는 rule 분류 결과 → 3번 진행
+  │  └─ 캐시 미스 또는 규칙기반(rule) 결과 → 3번 진행
   ├─ 3. Gemini API 호출 (url_context 툴)
   │  ├─ Gemini가 URL 직접 fetch
   │  ├─ AI 서비스 여부 판별
@@ -618,6 +618,16 @@ processing (started_at 기록)
 DB의 기존 분석이 실패 상태(`title`과 `description`이 모두 sentinel 값)인 경우:
 - 재분석 실행 (캐시 무효화)
 - 최대 재시도 초과 시 최종 실패로 기록
+
+## rule/classify 캐시 스킵 정책
+
+`POST /api/v1/rule/classify` 요청 시 DB에 기존 결과가 있으면 다음 기준으로 파이프라인 실행 여부를 결정한다.
+
+| 조건 | 동작 |
+|------|------|
+| `analyzer != "rule"` (LLM 결과) | 파이프라인 생략, DB 결과 그대로 반환 |
+| `analyzer == "rule"` + `hard_pass=true` + `review_required=false` + `total_score >= 60.0` | 파이프라인 생략, DB 결과 그대로 반환 |
+| 그 외 (신뢰도 미달 또는 캐시 없음) | 파이프라인 실행 후 DB 갱신 |
 
 ---
 
