@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from src.db.models import AISite, AICategory, AITag
-from src.db.models.ai_site import SITE_STATUS_OK
+from src.db.models.ai_site import SITE_STATUS_BLOCKED, SITE_STATUS_OK
 from src.ai.analyzer import get_analyzer
 from src.core.config import get_llm_provider
 from src.core.exceptions import SiteUnreachableError
@@ -90,6 +90,7 @@ class AIDetector:
         """AI 사이트 정보 저장."""
         scores = analysis.get("scores", {})
         now = utc_now()
+        site_status = SITE_STATUS_BLOCKED if analysis.get("anti_bot_blocked") else SITE_STATUS_OK
 
         existing = self.db.query(AISite).filter(AISite.url == url).first()
         if existing:
@@ -104,7 +105,7 @@ class AIDetector:
             existing.total_score = analysis.get("total_score")
             existing.review_required = analysis.get("review_required")
             existing.last_analyzed_at = now
-            existing.status = SITE_STATUS_OK
+            existing.status = site_status
             existing.unreachable_since = None
             self.db.add(existing)
             return existing
@@ -122,7 +123,7 @@ class AIDetector:
             total_score=analysis.get("total_score"),
             review_required=analysis.get("review_required"),
             last_analyzed_at=now,
-            status=SITE_STATUS_OK,
+            status=site_status,
         )
         self.db.add(site)
         self.db.flush()

@@ -148,9 +148,19 @@ class DiscoverySignalMixin:
         challenge_probe_text = " ".join([homepage.final_url, homepage.title, homepage.text[:2500], homepage_error])
         challenge_detector = getattr(self.fetcher, "is_challenge_text", None)
         challenge_detected = bool(challenge_detector(challenge_probe_text)) if callable(challenge_detector) else False
+
+        candidate_pages = [p for p in pages if p.final_url != homepage.final_url]
+        candidate_403_count = sum(1 for p in candidate_pages if p.status_code == 403)
+        mass_403_blocked = (
+            not homepage.ok
+            and homepage.status_code == 403
+            and len(candidate_pages) >= 4
+            and candidate_403_count / len(candidate_pages) >= 0.6
+        )
         anti_bot_blocked = bool(
             "anti_bot_challenge_detected" in homepage_error
             or challenge_detected
+            or mass_403_blocked
         )
 
         fetcher = getattr(self, "fetcher", None)

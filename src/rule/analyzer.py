@@ -140,6 +140,7 @@ def _map_to_analysis_dict(result: EvaluationResult, input_url: str) -> dict[str,
         "hard_pass": result.hard_pass,
         "total_score": result.total_score,
         "review_required": result.review_required,
+        "anti_bot_blocked": bool(extracted.get("anti_bot_blocked", False)),
     }
 
 

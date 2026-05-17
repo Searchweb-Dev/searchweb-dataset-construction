@@ -57,6 +57,10 @@ Gemini url_context 툴로 웹사이트를 분석한다.
   - 5가지 품질 기준 평가 (usable_now, clear_function_desc, docs, policy, pricing)
   - 가중치 기반 점수화 (0~100)
   - 상태 판정: curated / incubating / rejected
+  - **Anti-bot 완충 로직**:
+    - homepage 403 + 후보 URL 4개 이상 중 60% 이상이 403 → `anti_bot_blocked=True` 판정
+    - `anti_bot_blocked=True`이면 `rejected` 대신 `incubating`으로 완충 적용
+    - DB `ai_site.status`를 `"blocked"`로 저장 (재분석 대상 유지)
   - **신뢰도 기반 캐시 스킵**:
     - `analyzer != "rule"` (LLM 결과) → 항상 캐시 반환
     - `hard_pass=true` + `review_required=false` + `total_score >= 60.0` → 캐시 반환
