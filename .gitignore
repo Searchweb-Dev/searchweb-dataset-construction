@@ -229,6 +229,7 @@ output/
 
 # Claude Code
 harness/
+.claude/
 
 .serena/cache/*
 .serena/memories
