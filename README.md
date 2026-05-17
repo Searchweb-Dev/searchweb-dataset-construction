@@ -67,6 +67,15 @@ uv run uvicorn src.main:app --reload
 uv run celery -A src.workers.celery_app worker --loglevel=info
 ```
 
+### tools/ 스크립트 실행 (Excel 파싱 등)
+
+```bash
+uv pip install -r requirements-tools.txt
+uv run python tools/excel_reader.py
+```
+
+> `openpyxl`, `pandas`는 Docker 이미지에 포함되지 않는다. `tools/` 스크립트를 로컬에서 실행할 때만 필요하다.
+
 ## API 사용 예시
 
 ### 단건/배치 분석 요청
@@ -140,10 +149,13 @@ sw-test/
 │   ├── db/          # SQLAlchemy ORM 모델
 │   ├── schemas/     # Pydantic 스키마
 │   └── core/        # 환경 설정 및 유틸리티
+├── tools/           # 로컬 전용 스크립트 (Excel 파싱 등)
 ├── tests/
 ├── alembic/
 ├── docs/
-└── data/
+├── data/
+├── requirements.txt       # Docker 이미지 런타임 의존성
+└── requirements-tools.txt # tools/ 전용 의존성 (로컬 전용)
 ```
 
 ## 상세 문서
