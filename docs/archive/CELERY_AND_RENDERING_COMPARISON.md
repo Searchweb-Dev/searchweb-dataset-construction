@@ -612,3 +612,57 @@ async def analyze_safe(url: str):
 
 1. **Celery: 필수** (비동기 처리 + Job 추적)
 2. **MCP 방식: 권장** (간단한 구현 + 자동 유지보수)
+
+---
+
+## Part 5: 현재 구현 기준 Celery·Redis 사용 현황
+
+> 위 파트들은 기술 선택 근거를 다룬다. 본 파트는 실제 코드 기준의 동작 방식을 기술한다.
+
+### Redis 역할
+
+Redis는 Celery의 인프라로서 두 가지 용도로 사용된다.
+
+| 역할 | 설명 |
+|---|---|
+| **Broker** | API가 enqueue한 task 메시지를 Worker가 꺼내 실행하는 메시지 큐 |
+| **Result Backend** | Worker가 task 실행을 마친 후 결과를 저장하는 저장소 |
+
+```
+API → [Redis: broker] → Worker → [Redis: result_backend]
+```
+
+`celery_app.py`에서 `broker_url`과 `result_backend` 모두 동일한 Redis URL을 사용한다.
+
+### Celery task 구조
+
+task는 모두 `analyze` 큐로 라우팅된다 (`routing_key: analyze.default`).
+
+| Task | time_limit | max_retries | 용도 |
+|---|---|---|---|
+| `analyze_url` | 300s | 3 | 단건 URL 분석. 재시도 로직 포함. |
+| `analyze_urls_batch` | 600s | 3 | 최대 5개 URL을 `ThreadPoolExecutor`로 병렬 분석. `/analyze` 엔드포인트 전용. |
+| `analyze_urls_bulk` | 3600s | 0 | 파일 기반 대량 URL 일괄 분석. `/batch/upload`, `/batch/file` 전용. |
+
+### 전체 흐름
+
+```
+클라이언트
+  └─ POST /analyze
+       ├─ API: Job 레코드 생성 (status=PENDING)
+       ├─ analyze_urls_batch.delay() → Redis(broker)에 enqueue
+       └─ job_id 즉시 반환 (202 Accepted)
+
+Worker (별도 프로세스)
+  └─ Redis에서 task 꺼냄
+       ├─ Gemini API 호출 + 웹 크롤링
+       ├─ DB에 결과 저장
+       └─ Job status → SUCCESS / FAILED
+
+클라이언트
+  └─ GET /jobs/{job_id} 폴링으로 결과 확인
+```
+
+### Flower
+
+Celery task의 실행 현황(대기·처리·성공·실패 건수)을 웹 UI로 모니터링한다. Redis에서 데이터를 읽어 `:5555`에서 서비스된다.
