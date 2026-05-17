@@ -4,8 +4,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from urllib.parse import urljoin, urlparse
+
+logger = logging.getLogger(__name__)
 
 from src.rule.config import EvalConfig
 from src.rule.keywords import DOCS_TEXT, NEGATIVE_USE_TEXT, POLICY_TEXT, POSITIVE_USE_TEXT
@@ -106,7 +109,14 @@ class DiscoverySignalMixin:
                 return ordered[: self.config.max_total_candidate_pages]
 
         merge(kinds["probe"], None)
-        return ordered[: self.config.max_total_candidate_pages]
+        result = ordered[: self.config.max_total_candidate_pages]
+
+        domain = (homepage_url.split("//")[-1].split("/")[0]) if homepage_url else "-"
+        for kind in ["pricing", "docs", "policy", "product", "probe"]:
+            if kinds[kind]:
+                logger.info("[%s] 후보 URL (%s): %s", domain, kind, kinds[kind])
+
+        return result
 
     def _extract_structured_signals(self, homepage: FetchResult, pages: list[FetchResult]) -> dict[str, object]:
         """수집된 페이지들에서 pricing/docs/policy 등 구조화 신호를 추출한다."""
