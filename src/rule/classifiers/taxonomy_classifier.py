@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import re
 import logging
-from typing import Any
-
 from src.rule.keywords import (
     DEFAULT_META_BY_PRIMARY,
     META_CATEGORY_KEYWORDS,

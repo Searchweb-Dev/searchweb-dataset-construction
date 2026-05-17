@@ -8,8 +8,6 @@ import logging
 import re
 from urllib.parse import urljoin, urlparse
 
-logger = logging.getLogger(__name__)
-
 from src.rule.config import EvalConfig
 from src.rule.keywords import DOCS_TEXT, NEGATIVE_USE_TEXT, POLICY_TEXT, POSITIVE_USE_TEXT
 from src.rule.models import FetchResult
@@ -24,6 +22,8 @@ from src.rule.utils import (
     lower,
     normalize_url,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DiscoverySignalMixin:

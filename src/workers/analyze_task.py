@@ -31,7 +31,6 @@ from src.core.exceptions import (
 from src.core.enums import JobStatus
 from src.db.models.ai_site import (
     UNREACHABLE_TTL_SECONDS,
-    SITE_STATUS_OK,
     SITE_STATUS_UNREACHABLE,
     SITE_STATUS_BLOCKED,
     SITE_STATUS_FAILURE,

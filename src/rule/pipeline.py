@@ -10,13 +10,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-logger = logging.getLogger(__name__)
-
 from src.rule.config import EvalConfig, get_rule_config
 from src.rule.classifiers.criteria_evaluator import WeightedQualityEvaluator
 from src.rule.fetchers.page_fetcher import PageFetcher
-from src.rule.models import DummyLLM, EvaluationResult
-from src.rule.utils import lower, normalize_url
+from src.rule.models import EvaluationResult
+from src.rule.utils import lower
+
+logger = logging.getLogger(__name__)
 
 
 PipelineContext = dict[str, Any]

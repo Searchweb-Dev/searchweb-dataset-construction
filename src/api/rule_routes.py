@@ -11,7 +11,6 @@ from src.core.url import normalize_url
 from src.db.models import AISite
 from src.db.session import get_db
 from src.rule.analyzer import RuleAnalyzer
-from src.rule.models import EvaluationResult
 from src.rule.pipeline import run_quality_pipeline
 from src.schemas.rule import CriterionResponse, RuleClassifyRequest, RuleClassifyResponse
 
