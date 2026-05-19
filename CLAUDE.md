@@ -67,7 +67,3 @@ Read:
 ### 2.8. Code Search
 - Use Serena plugin first
 - Use bash `grep` only as a fallback
-
-### 2.9. Code Editing
-- Use `Edit` / `Write` tools directly for all code modifications
-- Never use Serena's `replace_content` for edits (causes unnecessary permission prompts)
